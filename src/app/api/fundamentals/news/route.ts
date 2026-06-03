@@ -18,7 +18,7 @@ export async function GET() {
         source: "Mode manuel",
         updatedAt: new Date().toISOString(),
         events: [],
-        error: error instanceof Error ? error.message : "Economic calendar unavailable",
+        error: toManualModeMessage(error),
       },
       { status: 200 },
     );
@@ -28,7 +28,7 @@ export async function GET() {
 async function fetchConfiguredEconomicCalendar({ from, to }: { from: Date; to: Date }) {
   if (process.env.ECONOMIC_CALENDAR_API_URL) {
     const response = await fetch(process.env.ECONOMIC_CALENDAR_API_URL, { cache: "no-store" });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Custom economic calendar API");
 
     return {
       mode: "api",
@@ -47,7 +47,7 @@ async function fetchConfiguredEconomicCalendar({ from, to }: { from: Date; to: D
     url.searchParams.set("to", toDateOnly(to));
 
     const response = await fetch(url, { cache: "no-store" });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "EODHD Economic Events API");
 
     return {
       mode: "api",
@@ -64,7 +64,7 @@ async function fetchConfiguredEconomicCalendar({ from, to }: { from: Date; to: D
     url.searchParams.set("apikey", process.env.FMP_API_KEY);
 
     const response = await fetch(url, { cache: "no-store" });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "Financial Modeling Prep Economic Calendar");
 
     return {
       mode: "api",
@@ -86,7 +86,7 @@ async function fetchConfiguredEconomicCalendar({ from, to }: { from: Date; to: D
         Authorization: `Bearer ${process.env.FXSTREET_ACCESS_TOKEN}`,
       },
     });
-    const payload = await response.json();
+    const payload = await readJsonResponse(response, "FXStreet Economic Calendar API");
 
     return {
       mode: "api",
@@ -118,6 +118,45 @@ function normalizeApiEvents(payload: unknown, fallbackSource: string): EconomicN
     .filter((event): event is EconomicNewsEvent => Boolean(event))
     .filter((event) => event.currency.toUpperCase() === "USD")
     .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
+}
+
+async function readJsonResponse(response: Response, source: string) {
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") ?? "";
+
+  if (!response.ok) {
+    throw new Error(`${source} indisponible (${response.status}) : ${cleanProviderMessage(text)}`);
+  }
+
+  if (!contentType.toLowerCase().includes("json")) {
+    throw new Error(`${source} n'a pas renvoye de JSON : ${cleanProviderMessage(text)}`);
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    throw new Error(`${source} a renvoye un JSON invalide : ${cleanProviderMessage(text)}`);
+  }
+}
+
+function cleanProviderMessage(value: string) {
+  const text = value.replace(/\s+/g, " ").trim();
+
+  if (!text) {
+    return "reponse vide";
+  }
+
+  return text.slice(0, 180);
+}
+
+function toManualModeMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : "Calendrier economique indisponible.";
+
+  if (message.toLowerCase().includes("only eod") || message.toLowerCase().includes("not valid json")) {
+    return "Le calendrier economique automatique n'est pas disponible avec la reponse actuelle du fournisseur. Mode manuel active.";
+  }
+
+  return message;
 }
 
 function normalizeApiEvent(row: unknown, index: number, fallbackSource: string): EconomicNewsEvent | null {

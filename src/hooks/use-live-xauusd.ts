@@ -18,6 +18,7 @@ function createEmptyCandleMap(): Record<Timeframe, Candle[]> {
 const streamUrl = process.env.NEXT_PUBLIC_XAUUSD_TICK_STREAM_URL || "/api/market/xauusd/stream";
 const historyUrl = process.env.NEXT_PUBLIC_XAUUSD_HISTORY_URL || "/api/market/xauusd/history";
 const tickPollUrl = process.env.NEXT_PUBLIC_XAUUSD_TICK_POLL_URL || "/api/market/xauusd/tick";
+const localBridgeOrigin = process.env.NEXT_PUBLIC_MT5_LOCAL_BRIDGE_ORIGIN || "http://127.0.0.1:3000";
 const serverOffsetMinutes = Number(process.env.NEXT_PUBLIC_MARKET_SERVER_UTC_OFFSET_MINUTES ?? 0);
 
 export function useLiveXauusd(): LiveMarketState {
@@ -30,6 +31,14 @@ export function useLiveXauusd(): LiveMarketState {
     candleMap: createEmptyCandleMap(),
   });
   const retryRef = useRef(0);
+  const endpoints = useMemo(
+    () => ({
+      history: getEndpointCandidates(historyUrl),
+      stream: getEndpointCandidates(streamUrl),
+      tick: getEndpointCandidates(tickPollUrl),
+    }),
+    [],
+  );
 
   function processTick(tick: MarketTick, message = "Flux XAUUSD live connecte.") {
     const latencyMs = Math.max(0, Date.now() - tick.time * 1000);
@@ -83,17 +92,8 @@ export function useLiveXauusd(): LiveMarketState {
 
       for (const timeframe of timeframes) {
         try {
-          const url = new URL(historyUrl, window.location.origin);
-          url.searchParams.set("symbol", "XAUUSD");
-          url.searchParams.set("timeframe", timeframe);
-          url.searchParams.set("limit", "600");
-          const response = await fetch(url.toString(), { cache: "no-store" });
-
-          if (!response.ok) {
-            throw new Error(`History ${timeframe}: ${response.status}`);
-          }
-
-          results.push([timeframe, normalizeHistoryCandles(await response.json())] as const);
+          const payload = await fetchFirstHistoryJson(endpoints.history, timeframe);
+          results.push([timeframe, normalizeHistoryCandles(payload)] as const);
           await wait(120);
         } catch {
           await wait(350);
@@ -159,12 +159,7 @@ export function useLiveXauusd(): LiveMarketState {
 
     async function pollTick() {
       try {
-        const response = await fetch(tickPollUrl, { cache: "no-store" });
-        const payload = await response.json();
-
-        if (!response.ok) {
-          throw new Error(payload?.error ?? `Tick HTTP ${response.status}`);
-        }
+        const payload = await fetchFirstJson(endpoints.tick);
 
         processMessage(payload);
       } catch (error) {
@@ -200,8 +195,10 @@ export function useLiveXauusd(): LiveMarketState {
 
       setState((current) => ({ ...current, status: retryRef.current ? "reconnecting" : "connecting", message: "Connexion au flux XAUUSD." }));
 
-      if (streamUrl.startsWith("ws")) {
-        const socket = new WebSocket(streamUrl);
+      const selectedStreamUrl = endpoints.stream[0];
+
+      if (selectedStreamUrl.startsWith("ws")) {
+        const socket = new WebSocket(selectedStreamUrl);
         close = () => socket.close();
 
         socket.addEventListener("open", () => {
@@ -222,7 +219,7 @@ export function useLiveXauusd(): LiveMarketState {
         return;
       }
 
-      const eventSource = new EventSource(streamUrl);
+      const eventSource = new EventSource(selectedStreamUrl);
       close = () => eventSource.close();
 
       eventSource.addEventListener("open", () => {
@@ -278,6 +275,55 @@ export function useLiveXauusd(): LiveMarketState {
   }, []);
 
   return useMemo(() => state, [state]);
+}
+
+async function fetchFirstJson(urls: string[]) {
+  const errors: string[] = [];
+
+  for (const candidate of urls) {
+    try {
+      const response = await fetch(new URL(candidate, window.location.origin).toString(), { cache: "no-store" });
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      }
+
+      return payload;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  throw new Error(errors.at(-1) ?? "Bridge MT5 inaccessible.");
+}
+
+async function fetchFirstHistoryJson(urls: string[], timeframe: Timeframe) {
+  const candidates = urls.map((candidate) => {
+    const url = new URL(candidate, window.location.origin);
+    url.searchParams.set("symbol", "XAUUSD");
+    url.searchParams.set("timeframe", timeframe);
+    url.searchParams.set("limit", "600");
+    return url.toString();
+  });
+
+  return fetchFirstJson(candidates);
+}
+
+function getEndpointCandidates(pathOrUrl: string) {
+  if (pathOrUrl.startsWith("http") || pathOrUrl.startsWith("ws")) {
+    return [pathOrUrl];
+  }
+
+  if (typeof window === "undefined" || isLocalHost(window.location.hostname)) {
+    return [pathOrUrl];
+  }
+
+  return [`${localBridgeOrigin}${pathOrUrl}`, pathOrUrl];
+}
+
+function isLocalHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function wait(ms: number) {

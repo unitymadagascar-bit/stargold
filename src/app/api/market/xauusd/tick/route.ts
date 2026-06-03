@@ -1,20 +1,28 @@
 import { NextResponse } from "next/server";
+import { bridgeCorsHeaders, bridgeOptionsResponse } from "@/lib/http/cors";
 import { fetchMarketTick } from "@/lib/market/market-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+export function OPTIONS() {
+  return bridgeOptionsResponse();
+}
+
 export async function GET() {
   try {
     const result = await fetchMarketTick();
 
-    return NextResponse.json({
-      source: result.provider,
-      symbol: result.symbol,
-      updatedAt: new Date().toISOString(),
-      warning: result.warning,
-      tick: result.data,
-    });
+    return NextResponse.json(
+      {
+        source: result.provider,
+        symbol: result.symbol,
+        updatedAt: new Date().toISOString(),
+        warning: result.warning,
+        tick: result.data,
+      },
+      { headers: bridgeCorsHeaders },
+    );
   } catch (error) {
     return NextResponse.json(
       {
@@ -24,7 +32,7 @@ export async function GET() {
         updatedAt: new Date().toISOString(),
         tick: null,
       },
-      { status: 503 },
+      { status: 503, headers: bridgeCorsHeaders },
     );
   }
 }

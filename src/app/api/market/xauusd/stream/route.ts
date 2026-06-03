@@ -1,7 +1,12 @@
+import { bridgeCorsHeaders, bridgeOptionsResponse } from "@/lib/http/cors";
 import { fetchMarketTick } from "@/lib/market/market-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+export function OPTIONS() {
+  return bridgeOptionsResponse();
+}
 
 export async function GET() {
   const encoder = new TextEncoder();
@@ -56,6 +61,7 @@ export async function GET() {
 
   return new Response(stream, {
     headers: {
+      ...bridgeCorsHeaders,
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "Content-Type": "text/event-stream; charset=utf-8",

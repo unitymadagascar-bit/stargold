@@ -1,4 +1,4 @@
-export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "Daily";
+export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
 export type Signal = "BUY" | "SELL" | "WAIT" | "HIGH RISK" | "NO TRADE";
 
@@ -17,6 +17,26 @@ export interface Candle {
   low: number;
   close: number;
   volume: number;
+}
+
+export interface MarketTick {
+  symbol: "XAUUSD";
+  time: number;
+  bid?: number;
+  ask?: number;
+  price: number;
+  volume?: number;
+}
+
+export type LiveConnectionStatus = "missing-config" | "connecting" | "live" | "reconnecting" | "error" | "closed";
+
+export interface LiveMarketState {
+  status: LiveConnectionStatus;
+  message: string;
+  lastTick: MarketTick | null;
+  serverOffsetMinutes: number;
+  latencyMs: number | null;
+  candleMap: Record<Timeframe, Candle[]>;
 }
 
 export interface SupportResistanceLevel {

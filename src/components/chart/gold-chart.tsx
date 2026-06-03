@@ -66,7 +66,7 @@ export function GoldChart({
 
     const chart = createChart(container, {
       autoSize: true,
-      height: 560,
+      height: 380,
       layout: {
         background: { type: ColorType.Solid, color: "#06080c" },
         textColor: "#9ca3af",
@@ -248,7 +248,7 @@ export function GoldChart({
   }
 
   return (
-    <section className="relative min-h-[680px] rounded-lg border border-white/10 bg-[#0a0d12] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.28)]">
+    <section className="relative rounded-md border border-white/10 bg-[#171717] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
         <div className="flex items-center gap-3">
           <div className="grid size-10 place-items-center rounded-md bg-amber-300/10 text-amber-200">
@@ -300,7 +300,7 @@ export function GoldChart({
         </div>
       </div>
 
-      <div className="relative mt-3 h-[560px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
+      <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
         <div ref={containerRef} className="h-full w-full" />
         {orderBlockOverlay ? (
           <div
@@ -323,7 +323,7 @@ export function GoldChart({
         {!candles.length ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
-      <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-4">
+      <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-5">
         <Legend color="bg-sky-400" label="Support live" />
         <Legend color="bg-amber-400" label="Resistance / liquidité" />
         <Legend color={(orderBlock ?? plan.orderBlock)?.direction === "bearish" ? "bg-red-400" : "bg-green-400"} label="Order Block zone" />
@@ -348,9 +348,9 @@ function ChartEmptyState({
   const live = connectionStatus === "live";
 
   return (
-    <div className="absolute inset-0 z-20 bg-[#06080c] p-4">
-      <div className="grid h-full gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex min-h-0 flex-col justify-between rounded-md border border-white/10 bg-[#0b1017] p-5">
+    <div className="absolute inset-0 z-20 bg-[#06080c] p-3">
+      <div className="grid h-full gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex min-h-0 flex-col justify-between rounded-md border border-white/10 bg-[#0b1017] p-4">
           <div>
             <div className="flex items-center gap-3">
               <div className={`grid size-10 place-items-center rounded-md ${live ? "bg-emerald-300/10 text-emerald-200" : "bg-amber-300/10 text-amber-200"}`}>
@@ -362,7 +362,7 @@ function ChartEmptyState({
               </div>
             </div>
 
-            <div className="mt-5 grid gap-2 md:grid-cols-2">
+            <div className="mt-4 grid gap-2 md:grid-cols-2">
               <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value="Lance TradeTSRBridge sur XAUUSD" />
               <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value="Choisis M1, M5 ou M15 pour scalp" />
               <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value="Attends les premieres bougies broker" />
@@ -370,7 +370,7 @@ function ChartEmptyState({
             </div>
           </div>
 
-          <div className="mt-5 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+          <div className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 shrink-0 text-amber-200" size={18} />
               <p className="text-sm leading-6 text-amber-100">
@@ -380,7 +380,7 @@ function ChartEmptyState({
           </div>
         </div>
 
-        <div className="rounded-md border border-white/10 bg-black/30 p-4">
+        <div className="rounded-md border border-white/10 bg-black/30 p-3">
           <div className="flex items-center gap-2 text-amber-100">
             <Zap size={17} />
             <p className="text-sm font-semibold">Scalping M1/M5/M15</p>

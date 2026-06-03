@@ -57,7 +57,7 @@ export function calculateConfluenceScore({
 
   const orderFlow =
     (analysis.liquiditySweep ? 10 : 0) +
-    (analysis.orderBlock ? 5 : 0) +
+    (analysis.orderBlock ? Math.round((analysis.orderBlock.score / 100) * 5) : 0) +
     (analysis.fvg ? 5 : 0) +
     (analysis.displacement ? 5 : 0);
 
@@ -110,23 +110,23 @@ export function generateFinalDecision({
   confirmations: number;
 }): Signal {
   if (dangerousNews || volatility === "trop dangereuse") {
-    return "HIGH RISK";
+    return "WAIT";
   }
 
   if (riskReward < 1.2) {
-    return "NO TRADE";
+    return "WAIT";
   }
 
   if (score < 50 || confirmations < 3 || direction === "Neutral") {
     return "WAIT";
   }
 
-  if (score >= 70 && direction === "Bullish") {
-    return "BUY";
+  if (score >= 75 && direction === "Bullish") {
+    return "STRONG BUY";
   }
 
-  if (score >= 70 && direction === "Bearish") {
-    return "SELL";
+  if (score >= 75 && direction === "Bearish") {
+    return "STRONG SELL";
   }
 
   return "WAIT";

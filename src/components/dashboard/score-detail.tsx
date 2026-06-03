@@ -29,7 +29,7 @@ export function ScoreDetail({
 
   return (
     <section className="rounded-lg border border-white/10 bg-[#111111] p-4">
-      <h2 className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Détail du score ({normalizedTotal}/100)</h2>
+      <h2 className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-slate-300">Detail du score ({normalizedTotal}/100)</h2>
 
       <div className="mt-4 space-y-3">
         {items.map((item) => (
@@ -63,115 +63,48 @@ function buildScoreDetail({
   price: number;
   spread: number | null;
 }): ScoreDetailItem[] {
-  const h1 = analyses.find((analysis) => analysis.timeframe === "H1");
-  const h4 = analyses.find((analysis) => analysis.timeframe === "H4");
-  const trendAligned = Boolean(h1 && h4 && h1.trend === h4.trend && h1.trend !== "range");
-  const premiumDiscount = scorePremiumDiscount(activeAnalysis, plan.direction, price);
-  const hasStructureShift = activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH";
-  const dxyFavorable = isDxyFavorable(fundamental, plan.direction);
-  const srReaction = Boolean(activeAnalysis?.retestConfirmed || activeAnalysis?.liquiditySweep);
-  const volatilityOk = activeAnalysis ? activeAnalysis.volatility !== "trop dangereuse" : false;
-  const spreadOk = spread === null ? true : spread <= 0.8;
+  void analyses;
+  void price;
+  const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
 
   return [
     {
-      label: "Tendance H1/H4 alignée",
-      note: h1 && h4 ? `${h1.trend} / ${h4.trend}` : "H1/H4 en attente",
-      score: trendAligned ? 15 : 0,
-      max: 15,
+      label: "Price Action",
+      note: activeAnalysis ? `Retest ${activeAnalysis.retestConfirmed ? "oui" : "non"} - ATR ${activeAnalysis.atr.toFixed(2)}` : "En attente",
+      score: plan.scoring.priceAction ?? plan.scoring.technical,
+      max: 30,
     },
     {
-      label: "Zone premium/discount favorable",
-      note: premiumDiscount.note,
-      score: premiumDiscount.score,
-      max: 15,
+      label: "Structure du marche",
+      note: activeAnalysis ? `${activeAnalysis.trend} - ${activeAnalysis.structure}` : "En attente",
+      score: plan.scoring.marketStructure ?? 0,
+      max: 20,
     },
     {
-      label: "Liquidity sweep confirmé",
-      note: activeAnalysis?.liquiditySweep ? "Sweep récent confirmé" : "Aucun sweep récent",
-      score: activeAnalysis?.liquiditySweep ? 15 : 0,
-      max: 15,
+      label: "Liquidite",
+      note: liquidity ? `${liquidity.type} - ${liquidity.probableDirection} - ${liquidity.confidence}/100` : "En attente",
+      score: plan.scoring.liquidity ?? 0,
+      max: 20,
     },
     {
-      label: "BOS / CHoCH confirmé",
-      note: hasStructureShift ? String(activeAnalysis?.structure) : "Aucune cassure structurelle",
-      score: hasStructureShift ? 15 : 0,
-      max: 15,
-    },
-    {
-      label: "Retest propre (OB/FVG)",
-      note: activeAnalysis?.retestConfirmed ? "Retest OB/FVG confirmé" : "Retest OB bear",
-      score: activeAnalysis?.retestConfirmed ? 10 : 0,
-      max: 10,
-    },
-    {
-      label: "Pas de news high-impact (±30min)",
-      note: fundamental.caution ? "News USD proche" : "Aucune news imminente",
-      score: fundamental.caution ? 0 : 10,
-      max: 10,
-    },
-    {
-      label: "Risk/Reward ≥ 1:2",
-      note: plan.riskReward ? `1:${plan.riskReward.toFixed(2)}` : "RR en attente",
-      score: plan.riskReward >= 2 ? 10 : 0,
-      max: 10,
-    },
-    {
-      label: "Contexte DXY favorable",
+      label: "DXY",
       note: `DXY ${formatDxyDirection(fundamental.dxy.direction)}`,
-      score: dxyFavorable ? 5 : 0,
-      max: 5,
+      score: plan.scoring.dxy ?? 0,
+      max: 10,
     },
     {
-      label: "Réaction S/R confirmée",
-      note: srReaction ? "Réaction validée" : "Aucune réaction nette",
-      score: srReaction ? 5 : 0,
-      max: 5,
+      label: "News economiques",
+      note: fundamental.caution ? "News USD proche" : "Aucune news imminente",
+      score: plan.scoring.news ?? 0,
+      max: 10,
     },
     {
-      label: "Volatilité acceptable",
-      note: `${activeAnalysis?.volatility ?? "attente"} · ATR ${(activeAnalysis?.atr ?? 0).toFixed(2)}`,
-      score: volatilityOk ? 3 : 0,
-      max: 3,
-    },
-    {
-      label: "Spread acceptable",
-      note: spread === null ? "Spread non renseigné" : `${spread.toFixed(2)} USD`,
-      score: spreadOk ? 2 : 0,
-      max: 2,
+      label: "Risque / volatilite",
+      note: spread === null ? `RR 1:${plan.riskReward.toFixed(2)}` : `RR 1:${plan.riskReward.toFixed(2)} - spread ${spread.toFixed(2)}`,
+      score: plan.scoring.volatilityRisk ?? plan.scoring.risk,
+      max: 10,
     },
   ];
-}
-
-function scorePremiumDiscount(activeAnalysis: TimeframeAnalysis | undefined, direction: TradePlan["direction"], price: number) {
-  if (!activeAnalysis || !price || !activeAnalysis.support || !activeAnalysis.resistance || activeAnalysis.resistance <= activeAnalysis.support) {
-    return { score: 0, note: "Zone non calculée" };
-  }
-
-  const midpoint = (activeAnalysis.support + activeAnalysis.resistance) / 2;
-  const zone = price >= midpoint ? "premium" : "discount";
-
-  if (direction === "Bullish") {
-    return { score: zone === "discount" ? 15 : 5, note: `Prix en ${zone}` };
-  }
-
-  if (direction === "Bearish") {
-    return { score: zone === "premium" ? 15 : 5, note: `Prix en ${zone}` };
-  }
-
-  return { score: 5, note: `Prix en ${zone}` };
-}
-
-function isDxyFavorable(fundamental: FundamentalContext, direction: TradePlan["direction"]) {
-  if (direction === "Bullish") {
-    return fundamental.dxy.direction === "falling";
-  }
-
-  if (direction === "Bearish") {
-    return fundamental.dxy.direction === "rising";
-  }
-
-  return false;
 }
 
 function formatDxyDirection(direction: FundamentalContext["dxy"]["direction"]) {

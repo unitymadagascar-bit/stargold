@@ -36,6 +36,13 @@ export function TimeframeCard({ analysis }: { analysis: TimeframeAnalysis }) {
         <span className="font-mono text-sm text-white">1:{analysis.riskReward.toFixed(2)}</span>
       </div>
 
+      <div className="mt-2 rounded-md bg-slate-900/80 px-3 py-2">
+        <p className="text-xs font-semibold text-sky-200">{analysis.waitReason}</p>
+        <p className="mt-1 truncate text-[11px] text-slate-500">
+          {analysis.missingConditions.length ? analysis.missingConditions.join(", ") : "Conditions OK"}
+        </p>
+      </div>
+
       <button
         className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-200 transition hover:bg-white/[0.07]"
         type="button"

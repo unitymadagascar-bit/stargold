@@ -13,13 +13,14 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, LiveConnectionStatus, Timeframe, TradePlan } from "@/types";
+import type { Candle, LiveConnectionStatus, OrderBlockZone, Timeframe, TradePlan } from "@/types";
 import { timeframes } from "@/lib/market/timeframes";
 
 export function GoldChart({
   candleMap,
   connectionMessage,
   connectionStatus,
+  orderBlock,
   onTimeframeChange,
   plan,
   timeframe,
@@ -27,12 +28,14 @@ export function GoldChart({
   candleMap: Record<Timeframe, Candle[]>;
   connectionMessage: string;
   connectionStatus: LiveConnectionStatus;
+  orderBlock?: OrderBlockZone | null;
   onTimeframeChange: (timeframe: Timeframe) => void;
   plan: TradePlan;
   timeframe: Timeframe;
 }) {
   const candles = candleMap[timeframe];
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
+  const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -177,15 +180,60 @@ export function GoldChart({
     }
     priceLineRefs.current = [];
 
+    const activeOrderBlock = orderBlock ?? plan.orderBlock;
+
     addPriceLine(series, priceLineRefs.current, plan.entry, "#facc15", "Entry");
     addPriceLine(series, priceLineRefs.current, plan.stopLoss, "#fb7185", "SL");
     plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
+
+    if (activeOrderBlock) {
+      const color = activeOrderBlock.direction === "bullish" ? "#22c55e" : "#ef4444";
+      addPriceLine(series, priceLineRefs.current, activeOrderBlock.high, color, `OB ${activeOrderBlock.score}/100`);
+      addPriceLine(series, priceLineRefs.current, activeOrderBlock.low, color, activeOrderBlock.strength);
+    }
 
     if (candles.length) {
       addPriceLine(series, priceLineRefs.current, Math.min(...candles.slice(-160).map((candle) => candle.low)), "#38bdf8", "Support");
       addPriceLine(series, priceLineRefs.current, Math.max(...candles.slice(-160).map((candle) => candle.high)), "#f59e0b", "Resistance");
     }
-  }, [candles, plan.entry, plan.stopLoss, plan.takeProfits]);
+  }, [candles, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
+
+  useEffect(() => {
+    const activeOrderBlock = orderBlock ?? plan.orderBlock;
+    const series = seriesRef.current;
+
+    if (!series || !activeOrderBlock) {
+      setOrderBlockOverlay(null);
+      return;
+    }
+
+    const updateOverlay = () => {
+      const high = series.priceToCoordinate(activeOrderBlock.high);
+      const low = series.priceToCoordinate(activeOrderBlock.low);
+
+      if (high === null || low === null) {
+        setOrderBlockOverlay(null);
+        return;
+      }
+
+      const bullish = activeOrderBlock.direction === "bullish";
+
+      setOrderBlockOverlay({
+        top: Math.min(high, low),
+        height: Math.max(4, Math.abs(low - high)),
+        background: bullish ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
+        border: bullish ? "rgba(34, 197, 94, 0.55)" : "rgba(239, 68, 68, 0.55)",
+        label: `${bullish ? "Bullish" : "Bearish"} OB ${activeOrderBlock.score}/100 - ${activeOrderBlock.strength}`,
+      });
+    };
+
+    updateOverlay();
+    chartRef.current?.subscribeCrosshairMove(updateOverlay);
+
+    return () => {
+      chartRef.current?.unsubscribeCrosshairMove(updateOverlay);
+    };
+  }, [candles.length, orderBlock, plan.orderBlock, timeframe]);
 
   function zoom(factor: number) {
     const timeScale = chartRef.current?.timeScale();
@@ -252,7 +300,27 @@ export function GoldChart({
         </div>
       </div>
 
-      <div ref={containerRef} className="mt-3 h-[560px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]" />
+      <div className="relative mt-3 h-[560px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
+        <div ref={containerRef} className="h-full w-full" />
+        {orderBlockOverlay ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 z-10 border-y"
+            style={{
+              top: orderBlockOverlay.top,
+              height: orderBlockOverlay.height,
+              background: orderBlockOverlay.background,
+              borderColor: orderBlockOverlay.border,
+            }}
+          >
+            <span
+              className="absolute right-2 top-1 rounded px-2 py-0.5 font-mono text-[10px] font-semibold text-white shadow-lg"
+              style={{ background: orderBlockOverlay.border }}
+            >
+              {orderBlockOverlay.label}
+            </span>
+          </div>
+        ) : null}
+      </div>
 
       {!candles.length ? (
         <div className="pointer-events-none absolute inset-x-6 top-56 rounded-lg border border-amber-300/25 bg-black/80 p-5 text-center shadow-2xl backdrop-blur">
@@ -266,6 +334,7 @@ export function GoldChart({
       <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-4">
         <Legend color="bg-sky-400" label="Support live" />
         <Legend color="bg-amber-400" label="Resistance / liquidité" />
+        <Legend color={(orderBlock ?? plan.orderBlock)?.direction === "bearish" ? "bg-red-400" : "bg-green-400"} label="Order Block zone" />
         <Legend color="bg-rose-400" label="Stop loss" />
         <Legend color="bg-emerald-400" label="Take profits" />
       </div>
@@ -294,6 +363,14 @@ function addPriceLine(
       title,
     }),
   );
+}
+
+interface OrderBlockOverlay {
+  top: number;
+  height: number;
+  background: string;
+  border: string;
+  label: string;
 }
 
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {

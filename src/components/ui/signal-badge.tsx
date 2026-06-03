@@ -1,11 +1,11 @@
 import type { Signal } from "@/types";
 
 const styles: Record<Signal, string> = {
-  BUY: "border-emerald-400/35 bg-emerald-400/12 text-emerald-200",
-  SELL: "border-rose-400/35 bg-rose-400/12 text-rose-200",
+  "STRONG BUY": "border-emerald-400/40 bg-emerald-400/14 text-emerald-100",
+  "BUY SCALP": "border-lime-400/35 bg-lime-400/12 text-lime-200",
   WAIT: "border-sky-400/35 bg-sky-400/12 text-sky-200",
-  "HIGH RISK": "border-amber-400/40 bg-amber-400/12 text-amber-200",
-  "NO TRADE": "border-slate-400/35 bg-slate-400/12 text-slate-200",
+  "SELL SCALP": "border-orange-400/35 bg-orange-400/12 text-orange-200",
+  "STRONG SELL": "border-rose-400/40 bg-rose-400/14 text-rose-100",
 };
 
 export function SignalBadge({ signal }: { signal: Signal }) {

@@ -12,13 +12,14 @@ export function calculateFundamentalDecisionScore({
   fundamental: FundamentalContext;
   riskReward: number;
 }): ScoringBreakdown {
+  const orderBlockScore = analysis.orderBlock ? Math.round((analysis.orderBlock.score / 100) * 6) : 0;
   const priceAction = clamp(
-    (analysis.retestConfirmed ? 12 : 0) +
-      (analysis.liquiditySweep ? 10 : 0) +
-      (analysis.support > 0 && analysis.resistance > 0 ? 8 : 0) +
-      (analysis.displacement ? 6 : 0) +
+    (analysis.retestConfirmed ? 8 : 0) +
+      orderBlockScore +
+      (analysis.support > 0 && analysis.resistance > 0 ? 5 : 0) +
+      (analysis.displacement ? 7 : 0) +
       (riskReward >= 2 ? 4 : 0),
-    40,
+    30,
   );
   const marketStructure = clamp(
     (analysis.trend !== "range" ? 7 : 0) +
@@ -26,30 +27,62 @@ export function calculateFundamentalDecisionScore({
       ((direction === "Bullish" && analysis.ema20 > analysis.ema50) || (direction === "Bearish" && analysis.ema20 < analysis.ema50) ? 5 : 0),
     20,
   );
-  const dxy = scoreBiasAlignment({ bias: interpretDxyBias(fundamental.dxy), direction, max: 15 });
-  const news = fundamental.caution ? 0 : scoreBiasAlignment({ bias: fundamental.newsBias, direction, max: 15 });
+  const liquidity = scoreLiquidityAlignment({ analysis, direction });
+  const dxy = scoreBiasAlignment({ bias: interpretDxyBias(fundamental.dxy), direction, max: 10 });
+  const news = fundamental.caution ? 0 : scoreBiasAlignment({ bias: fundamental.newsBias, direction, max: 10 });
   const risk = scoreRisk(analysis.volatility, fundamental.caution, riskReward);
 
   return {
     technical: priceAction,
-    orderFlow: marketStructure,
+    orderFlow: marketStructure + liquidity,
     fundamental: dxy + news,
     risk,
-    total: priceAction + marketStructure + dxy + news + risk,
+    total: priceAction + marketStructure + liquidity + dxy + news + risk,
     priceAction,
     marketStructure,
+    liquidity,
     dxy,
     news,
     volatilityRisk: risk,
   };
 }
 
+function scoreLiquidityAlignment({ analysis, direction }: { analysis: TechnicalAnalysis; direction: Direction }) {
+  const liquidity = analysis.liquidity;
+  const aligned =
+    (direction === "Bullish" && liquidity.probableDirection === "BUY") ||
+    (direction === "Bearish" && liquidity.probableDirection === "SELL") ||
+    (direction === "Neutral" && liquidity.probableDirection === "Attendre");
+  const base = Math.round((liquidity.confidence / 100) * 20);
+
+  if (liquidity.sweepDetected && !liquidity.rejectionConfirmed && !liquidity.realBreakoutContinuation) {
+    return Math.min(base, 8);
+  }
+
+  if (aligned) {
+    return base;
+  }
+
+  if (liquidity.probableDirection === "Attendre") {
+    return Math.round(base * 0.55);
+  }
+
+  return Math.round(base * 0.25);
+}
+
 export function hasRequiredTechnicalConfirmation(analysis: TechnicalAnalysis) {
+  const orderBlockConfirmation = Boolean(
+    analysis.orderBlock?.touched &&
+      analysis.orderBlock.score >= 60 &&
+      (analysis.retestConfirmed || analysis.liquiditySweep || analysis.structure === "BOS" || analysis.structure === "CHoCH" || analysis.fvg),
+  );
+
   return Boolean(
     analysis.retestConfirmed ||
       analysis.liquiditySweep ||
       analysis.structure === "BOS" ||
       analysis.structure === "CHoCH" ||
+      orderBlockConfirmation ||
       (analysis.support > 0 && analysis.resistance > 0 && analysis.displacement),
   );
 }
@@ -65,7 +98,7 @@ export function applyFundamentalDecisionGuard({
   hasTechnicalConfirmation: boolean;
   score: number;
 }): Signal {
-  if (baseDecision !== "BUY" && baseDecision !== "SELL") {
+  if (baseDecision === "WAIT") {
     return baseDecision;
   }
 
@@ -78,7 +111,7 @@ export function applyFundamentalDecisionGuard({
   }
 
   if (score < 40) {
-    return "NO TRADE";
+    return "WAIT";
   }
 
   if (score < 60) {

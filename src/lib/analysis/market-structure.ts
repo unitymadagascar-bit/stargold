@@ -6,6 +6,8 @@ import type {
   Trend,
   VolatilityState,
 } from "@/types";
+import { detectLiquidityAnalysis } from "@/lib/analysis/liquidity";
+import { detectOrderBlock } from "@/lib/analysis/order-blocks";
 import { calculateATR, calculateEMA, calculateRSI, lastValue } from "@/lib/indicators";
 
 function roundPrice(price: number): number {
@@ -159,6 +161,7 @@ export function analyzeCandles(candles: Candle[]): TechnicalAnalysis {
   const last = candles.at(-1);
   const previous = candles.at(-2);
   const displacement = Boolean(last && previous && Math.abs(last.close - last.open) > atr * 0.8);
+  const liquidity = detectLiquidityAnalysis(candles);
 
   return {
     trend: detectTrend(candles),
@@ -172,10 +175,11 @@ export function analyzeCandles(candles: Candle[]): TechnicalAnalysis {
     resistance,
     breakout,
     fakeout,
-    liquiditySweep: detectLiquiditySweep(candles),
+    liquiditySweep: detectLiquiditySweep(candles) || liquidity.sweepDetected,
     retestConfirmed: Boolean(last && Math.abs(last.close - support) < atr * 0.7 && last.close > last.open),
     volatility: classifyVolatility(candles, atr),
-    orderBlock: previous && displacement ? roundPrice(previous.open) : null,
+    orderBlock: detectOrderBlock({ candles }),
+    liquidity,
     fvg: last && previous && Math.abs(last.low - previous.high) > atr * 0.25 ? { low: previous.high, high: last.low } : null,
     displacement,
   };

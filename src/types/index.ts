@@ -1,6 +1,8 @@
 export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
-export type Signal = "BUY" | "SELL" | "WAIT" | "HIGH RISK" | "NO TRADE";
+export type Signal = "STRONG BUY" | "BUY SCALP" | "WAIT" | "SELL SCALP" | "STRONG SELL";
+
+export type SignalMode = "conservative" | "scalping";
 
 export type Direction = "Bullish" | "Bearish" | "Neutral";
 
@@ -51,6 +53,80 @@ export interface SupportResistanceLevel {
   strength: number;
 }
 
+export type OrderBlockDirection = "bullish" | "bearish";
+
+export type OrderBlockStrength = "strong" | "medium" | "weak" | "ignored";
+
+export interface OrderBlockScoreBreakdown {
+  bos: number;
+  displacement: number;
+  trendAlignment: number;
+  liquiditySweep: number;
+  freshness: number;
+  fvg: number;
+  riskReward: number;
+  volatility: number;
+  total: number;
+}
+
+export interface OrderBlockZone {
+  direction: OrderBlockDirection;
+  strength: OrderBlockStrength;
+  score: number;
+  proximal: number;
+  distal: number;
+  low: number;
+  high: number;
+  originTime: number;
+  breakTime: number;
+  touched: boolean;
+  retestCount: number;
+  fresh: boolean;
+  bosConfirmed: boolean;
+  displacementConfirmed: boolean;
+  liquiditySweep: boolean;
+  fvg: { low: number; high: number } | null;
+  riskReward: number;
+  atrQuality: "good" | "acceptable" | "poor";
+  requiresExtraConfirmation: boolean;
+  reasons: string[];
+  scoreBreakdown: OrderBlockScoreBreakdown;
+}
+
+export type LiquidityType = "buy-side liquidity" | "sell-side liquidity" | "mixed" | "none";
+
+export type LiquidityDirection = "BUY" | "SELL" | "Attendre";
+
+export interface LiquidityZone {
+  price: number;
+  type: "buy-side liquidity" | "sell-side liquidity";
+  strength: number;
+  equalLevel: boolean;
+}
+
+export interface LiquidityAnalysis {
+  zone: LiquidityZone | null;
+  type: LiquidityType;
+  buySideZones: LiquidityZone[];
+  sellSideZones: LiquidityZone[];
+  equalHighs: LiquidityZone[];
+  equalLows: LiquidityZone[];
+  sweepDetected: boolean;
+  stopHunt: boolean;
+  falseBreakout: boolean;
+  rejectionConfirmed: boolean;
+  reversalAfterLiquidityGrab: boolean;
+  realBreakoutContinuation: boolean;
+  consolidationBeforeImpulse: boolean;
+  longWick: boolean;
+  activeSession: "London" | "New York" | "Overlap" | "Off session";
+  probableDirection: LiquidityDirection;
+  confidence: number;
+  riskLevel: "faible" | "modere" | "eleve";
+  cautionMessage: string;
+  reasons: string[];
+}
+
 export interface TechnicalAnalysis {
   trend: Trend;
   structure: StructureState;
@@ -66,7 +142,8 @@ export interface TechnicalAnalysis {
   liquiditySweep: boolean;
   retestConfirmed: boolean;
   volatility: VolatilityState;
-  orderBlock: number | null;
+  orderBlock: OrderBlockZone | null;
+  liquidity: LiquidityAnalysis;
   fvg: { low: number; high: number } | null;
   displacement: boolean;
 }
@@ -125,6 +202,9 @@ export interface FundamentalContext {
 export interface TimeframeAnalysis {
   timeframe: Timeframe;
   signal: Signal;
+  signalMode: SignalMode;
+  waitReason: string;
+  missingConditions: string[];
   score: number;
   trend: Trend;
   rsi: number;
@@ -136,6 +216,8 @@ export interface TimeframeAnalysis {
   retestConfirmed: boolean;
   volatility: VolatilityState;
   newsNearby: boolean;
+  orderBlock: OrderBlockZone | null;
+  liquidity: LiquidityAnalysis | null;
   riskReward: number;
   summary: string;
 }
@@ -148,6 +230,7 @@ export interface ScoringBreakdown {
   total: number;
   priceAction?: number;
   marketStructure?: number;
+  liquidity?: number;
   dxy?: number;
   news?: number;
   volatilityRisk?: number;
@@ -156,6 +239,9 @@ export interface ScoringBreakdown {
 export interface TradePlan {
   direction: Direction;
   decision: Signal;
+  signalMode: SignalMode;
+  waitReason: string;
+  missingConditions: string[];
   score: number;
   summary: string;
   entry: number;
@@ -165,6 +251,8 @@ export interface TradePlan {
   lotSize: number;
   alerts: string[];
   scoring: ScoringBreakdown;
+  orderBlock: OrderBlockZone | null;
+  liquidity: LiquidityAnalysis | null;
 }
 
 export interface RiskInput {

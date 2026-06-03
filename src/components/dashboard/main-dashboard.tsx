@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, AlertTriangle, Clock, Gauge, LineChart, Radio, ShieldCheck, Target } from "lucide-react";
-import type { Timeframe } from "@/types";
+import type { LiquidityAnalysis, OrderBlockZone, SignalMode, Timeframe } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { RiskPanel } from "@/components/risk-management/risk-panel";
@@ -21,13 +21,14 @@ export function MainDashboard() {
   const live = useLiveXauusd();
   const fundamentals = useFundamentalContext();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
+  const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, news: newsEvents }),
-    [fundamentals.fundamental, live.candleMap],
+    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents }),
+    [fundamentals.fundamental, live.candleMap, signalMode],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, news: newsEvents }),
-    [fundamentals.fundamental, live.candleMap],
+    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, preferredTimeframe: activeTimeframe }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, signalMode],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -63,6 +64,20 @@ export function MainDashboard() {
         </div>
       </header>
 
+      <section className="mt-3 rounded-lg border border-white/10 bg-[#0b1017]/90 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="inline-flex rounded-md border border-white/10 bg-black/25 p-1">
+            <ModeButton active={signalMode === "conservative"} label="Conservative" onClick={() => setSignalMode("conservative")} />
+            <ModeButton active={signalMode === "scalping"} label="Scalping" onClick={() => setSignalMode("scalping")} />
+          </div>
+          <p className="text-xs leading-5 text-slate-400">
+            {signalMode === "scalping"
+              ? "Scalping has higher risk and requires strict stop loss."
+              : "Conservative mode requires stronger confirmation and accepts more WAIT signals."}
+          </p>
+        </div>
+      </section>
+
       <section className="mt-3">
         <TimeframeGrid analyses={timeframeAnalyses} />
       </section>
@@ -72,6 +87,7 @@ export function MainDashboard() {
           candleMap={live.candleMap}
           connectionMessage={live.message}
           connectionStatus={live.status}
+          orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock}
           plan={plan}
           timeframe={activeTimeframe}
           onTimeframeChange={setActiveTimeframe}
@@ -87,6 +103,14 @@ export function MainDashboard() {
               <SignalBadge signal={activeAnalysis?.signal ?? "WAIT"} />
             </div>
             <p className="mt-3 text-sm leading-6 text-slate-300">{plan.summary}</p>
+            <div className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-3">
+              <p className="text-sm font-semibold text-sky-100">{activeAnalysis?.waitReason ?? plan.waitReason}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-300">
+                {activeAnalysis?.missingConditions.length
+                  ? `Missing before signal: ${activeAnalysis.missingConditions.join(", ")}`
+                  : "All required conditions are currently satisfied for this mode."}
+              </p>
+            </div>
             <div className="mt-4">
               <ScoreBar value={activeAnalysis?.score ?? 0} compact />
             </div>
@@ -99,10 +123,11 @@ export function MainDashboard() {
               <SetupMetric label="Retest" value={activeAnalysis?.retestConfirmed ? "confirmé" : "attente"} />
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-              <SetupMetric label="Price Action" value={`${plan.scoring.priceAction ?? plan.scoring.technical}/40`} />
+              <SetupMetric label="Price Action" value={`${plan.scoring.priceAction ?? plan.scoring.technical}/30`} />
               <SetupMetric label="Structure" value={`${plan.scoring.marketStructure ?? plan.scoring.orderFlow}/20`} />
-              <SetupMetric label="DXY" value={`${plan.scoring.dxy ?? 0}/15`} />
-              <SetupMetric label="News USD" value={`${plan.scoring.news ?? 0}/15`} />
+              <SetupMetric label="Liquidite" value={`${plan.scoring.liquidity ?? 0}/20`} />
+              <SetupMetric label="DXY" value={`${plan.scoring.dxy ?? 0}/10`} />
+              <SetupMetric label="News USD" value={`${plan.scoring.news ?? 0}/10`} />
               <SetupMetric label="Risque" value={`${plan.scoring.volatilityRisk ?? plan.scoring.risk}/10`} />
               <SetupMetric label="Total" value={`${plan.score}/100`} />
             </div>
@@ -116,6 +141,10 @@ export function MainDashboard() {
             price={latestPrice}
             spread={spread}
           />
+
+          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} />
+
+          <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
 
           <TradeChecklist />
 
@@ -186,6 +215,20 @@ function StatusPill({ status, message }: { status: string; message: string }) {
   );
 }
 
+function ModeButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      className={`h-9 rounded px-3 text-sm font-semibold transition ${
+        active ? "bg-amber-300/15 text-amber-100" : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"
+      }`}
+      type="button"
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
+}
+
 function SummaryCard({ icon, label, value, helper }: { icon: ReactNode; label: string; value: ReactNode; helper: string }) {
   return (
     <div className="rounded-lg border border-white/10 bg-black/25 p-4">
@@ -204,6 +247,153 @@ function SetupMetric({ label, value }: { label: string; value: string }) {
     <div className="rounded-md bg-black/25 px-3 py-2">
       <p className="text-[11px] uppercase tracking-[0.12em] text-slate-500">{label}</p>
       <p className="mt-1 text-slate-200">{value}</p>
+    </div>
+  );
+}
+
+function LiquidityPanel({ liquidity }: { liquidity: LiquidityAnalysis | null | undefined }) {
+  if (!liquidity) {
+    return (
+      <section className="rounded-lg border border-white/10 bg-[#0b1017]/90 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-white">Analyse de Liquidite XAUUSD</h2>
+          <span className="rounded border border-slate-400/20 bg-slate-400/10 px-2 py-1 font-mono text-xs text-slate-300">WAIT</span>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-400">En attente de suffisamment de bougies live pour cartographier la liquidite.</p>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+          <SetupMetric label="Zone detectee" value="--" />
+          <SetupMetric label="Type" value="none" />
+          <SetupMetric label="Sweep detecte" value="non" />
+          <SetupMetric label="Rejet confirme" value="non" />
+          <SetupMetric label="Direction probable" value="Attendre" />
+          <SetupMetric label="Confiance" value="0/100" />
+        </div>
+      </section>
+    );
+  }
+
+  const directional =
+    liquidity.probableDirection === "BUY"
+      ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100"
+      : liquidity.probableDirection === "SELL"
+        ? "border-red-300/20 bg-red-300/10 text-red-100"
+        : "border-sky-300/20 bg-sky-300/10 text-sky-100";
+  const caution = liquidity.sweepDetected && !liquidity.rejectionConfirmed && !liquidity.realBreakoutContinuation;
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-[#0b1017]/90 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-white">Analyse de Liquidite XAUUSD</h2>
+          <p className="mt-1 text-xs text-slate-500">Session {liquidity.activeSession} · risque {liquidity.riskLevel}</p>
+        </div>
+        <span className={`rounded border px-2 py-1 font-mono text-xs font-semibold ${directional}`}>{liquidity.confidence}/100</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+        <SetupMetric label="Zone detectee" value={liquidity.zone ? `${liquidity.zone.price.toFixed(2)} (${liquidity.zone.strength}/5)` : "--"} />
+        <SetupMetric label="Type" value={liquidity.type} />
+        <SetupMetric label="Sweep detecte" value={liquidity.sweepDetected ? "oui" : "non"} />
+        <SetupMetric label="Rejet confirme" value={liquidity.rejectionConfirmed ? "oui" : "non"} />
+        <SetupMetric label="Direction probable" value={liquidity.probableDirection} />
+        <SetupMetric label="Confiance" value={`${liquidity.confidence}/100`} />
+        <SetupMetric label="Equal highs/lows" value={`${liquidity.equalHighs.length}/${liquidity.equalLows.length}`} />
+        <SetupMetric label="Stop hunt" value={liquidity.stopHunt ? "oui" : "non"} />
+        <SetupMetric label="Cassure reelle" value={liquidity.realBreakoutContinuation ? "oui" : "non"} />
+      </div>
+
+      <p className={`mt-4 rounded-md border p-3 text-xs leading-5 ${caution ? "border-amber-300/25 bg-amber-300/10 text-amber-100" : "border-white/10 bg-black/25 text-slate-300"}`}>
+        {caution ? "Prudence: liquidite prise sans confirmation. Attendre bougie de rejet, changement de structure ou retest." : liquidity.cautionMessage}
+      </p>
+
+      <div className="mt-3 space-y-1.5">
+        {liquidity.reasons.slice(0, 5).map((reason) => (
+          <p key={reason} className="rounded-md bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+            {reason}
+          </p>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function OrderBlockPanel({ orderBlock }: { orderBlock: OrderBlockZone | null | undefined }) {
+  if (!orderBlock) {
+    return (
+      <section className="rounded-lg border border-white/10 bg-[#0b1017]/90 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-white">Order Block</h2>
+          <span className="rounded border border-slate-400/20 bg-slate-400/10 px-2 py-1 font-mono text-xs text-slate-300">WAIT</span>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-400">Aucune zone Order Block qualifiee au-dessus de 60/100 sur cette timeframe.</p>
+        <p className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-xs leading-5 text-amber-100">
+          Order Block is an analysis zone, not a guaranteed entry.
+        </p>
+      </section>
+    );
+  }
+
+  const bullish = orderBlock.direction === "bullish";
+  const accent = bullish ? "text-emerald-200" : "text-red-200";
+  const border = bullish ? "border-emerald-300/20" : "border-red-300/20";
+  const bg = bullish ? "bg-emerald-300/10" : "bg-red-300/10";
+
+  return (
+    <section className={`rounded-lg border ${border} bg-[#0b1017]/90 p-4`}>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-white">Order Block</h2>
+          <p className={`mt-1 text-xs font-semibold uppercase tracking-[0.14em] ${accent}`}>
+            {bullish ? "Bullish" : "Bearish"} · {orderBlock.strength}
+          </p>
+        </div>
+        <span className={`rounded border px-2 py-1 font-mono text-xs font-semibold ${border} ${bg} ${accent}`}>{orderBlock.score}/100</span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+        <SetupMetric label="Zone" value={`${orderBlock.low.toFixed(2)} - ${orderBlock.high.toFixed(2)}`} />
+        <SetupMetric label="Freshness" value={orderBlock.fresh ? "fraiche" : `${orderBlock.retestCount} retest(s)`} />
+        <SetupMetric label="BOS" value={orderBlock.bosConfirmed ? "confirme" : "absent"} />
+        <SetupMetric label="Displacement" value={orderBlock.displacementConfirmed ? "fort" : "faible"} />
+        <SetupMetric label="Liquidity sweep" value={orderBlock.liquiditySweep ? "confirme" : "absent"} />
+        <SetupMetric label="FVG" value={orderBlock.fvg ? `${orderBlock.fvg.low.toFixed(2)} - ${orderBlock.fvg.high.toFixed(2)}` : "absent"} />
+        <SetupMetric label="Risk/Reward" value={orderBlock.riskReward ? `1:${orderBlock.riskReward.toFixed(2)}` : "--"} />
+        <SetupMetric label="ATR quality" value={orderBlock.atrQuality} />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+        <ScoreMini label="BOS" score={orderBlock.scoreBreakdown.bos} max={25} />
+        <ScoreMini label="Displacement" score={orderBlock.scoreBreakdown.displacement} max={20} />
+        <ScoreMini label="H1/H4" score={orderBlock.scoreBreakdown.trendAlignment} max={15} />
+        <ScoreMini label="Sweep" score={orderBlock.scoreBreakdown.liquiditySweep} max={10} />
+        <ScoreMini label="Freshness" score={orderBlock.scoreBreakdown.freshness} max={10} />
+        <ScoreMini label="FVG" score={orderBlock.scoreBreakdown.fvg} max={10} />
+        <ScoreMini label="RR" score={orderBlock.scoreBreakdown.riskReward} max={5} />
+        <ScoreMini label="ATR" score={orderBlock.scoreBreakdown.volatility} max={5} />
+      </div>
+
+      <div className="mt-4 space-y-1.5">
+        {orderBlock.reasons.slice(0, 5).map((reason) => (
+          <p key={reason} className="rounded-md bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+            {reason}
+          </p>
+        ))}
+      </div>
+
+      <p className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3 text-xs leading-5 text-amber-100">
+        Order Block is an analysis zone, not a guaranteed entry.
+      </p>
+    </section>
+  );
+}
+
+function ScoreMini({ label, score, max }: { label: string; score: number; max: number }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md bg-black/25 px-3 py-2">
+      <span className="text-slate-400">{label}</span>
+      <span className={score === max ? "font-mono font-semibold text-emerald-300" : score > 0 ? "font-mono font-semibold text-amber-300" : "font-mono text-slate-500"}>
+        {score}/{max}
+      </span>
     </div>
   );
 }

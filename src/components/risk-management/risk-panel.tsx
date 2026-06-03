@@ -41,7 +41,7 @@ export function RiskPanel({ plan }: { plan: TradePlan }) {
       <div className="mt-4 rounded-md border border-emerald-300/20 bg-emerald-300/10 p-3 text-sm leading-6 text-emerald-100">
         <div className="flex gap-2">
           <ShieldCheck size={18} className="mt-0.5 shrink-0" />
-          <p>RR minimum recommandé : 1:2. Si le RR descend sous ce seuil, le score baisse et la décision passe vers WAIT ou NO TRADE.</p>
+          <p>RR minimum recommandé : 1:2. Si le RR descend sous ce seuil, le score baisse et la décision reste en WAIT.</p>
         </div>
       </div>
     </section>

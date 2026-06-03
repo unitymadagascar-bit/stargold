@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, AlertTriangle, Clock, Gauge, LineChart, Radio, ShieldCheck, Target } from "lucide-react";
 import type { Timeframe } from "@/types";
@@ -32,6 +32,17 @@ export function MainDashboard() {
   const activeCandles = live.candleMap[activeTimeframe];
   const activeAnalysis = timeframeAnalyses.find((item) => item.timeframe === activeTimeframe);
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
+
+  useEffect(() => {
+    if (activeCandles.length) {
+      return;
+    }
+
+    const firstAvailable = timeframeAnalyses.find((item) => live.candleMap[item.timeframe].length > 0)?.timeframe;
+    if (firstAvailable) {
+      setActiveTimeframe(firstAvailable);
+    }
+  }, [activeCandles.length, live.candleMap, timeframeAnalyses]);
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1760px] px-3 py-3 sm:px-5 lg:px-6">

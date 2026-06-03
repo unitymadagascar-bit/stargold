@@ -8,7 +8,15 @@ import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDe
 const MIN_ANALYSIS_CANDLES = 30;
 
 export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
-  return candleMap.M1.at(-1)?.close ?? candleMap.M5.at(-1)?.close ?? candleMap.H1.at(-1)?.close ?? 0;
+  for (const timeframe of timeframes) {
+    const close = candleMap[timeframe].at(-1)?.close;
+
+    if (close) {
+      return close;
+    }
+  }
+
+  return 0;
 }
 
 export function buildLiveTimeframeAnalyses({
@@ -108,7 +116,7 @@ export function buildLiveTradePlan({
   macro: MacroContext;
   news: NewsEvent[];
 }): TradePlan {
-  const analysisTimeframe = candleMap.H1.length >= MIN_ANALYSIS_CANDLES ? "H1" : "M15";
+  const analysisTimeframe = getPlanTimeframe(candleMap);
   const candles = candleMap[analysisTimeframe];
   const price = getLatestPrice(candleMap);
 
@@ -191,6 +199,18 @@ function getStopLoss(direction: Direction, price: number, support: number, resis
 
 function getTakeProfits(direction: Direction, price: number, risk: number): [number, number, number] {
   return direction === "Bearish" ? [price - risk * 2, price - risk * 3, price - risk * 4] : [price + risk * 2, price + risk * 3, price + risk * 4];
+}
+
+function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>): Timeframe {
+  if (candleMap.H1.length >= MIN_ANALYSIS_CANDLES) {
+    return "H1";
+  }
+
+  if (candleMap.M15.length >= MIN_ANALYSIS_CANDLES) {
+    return "M15";
+  }
+
+  return timeframes.find((timeframe) => candleMap[timeframe].length >= MIN_ANALYSIS_CANDLES) ?? "M15";
 }
 
 function summarizeDecision(decision: string, direction: Direction) {

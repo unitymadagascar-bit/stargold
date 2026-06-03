@@ -85,7 +85,7 @@ export function normalizeHistoryCandles(payload: unknown): Candle[] {
       }
 
       const source = row as Record<string, unknown>;
-      const time = normalizeTickTimeSeconds(source.time ?? source.timestamp ?? source.t);
+      const time = normalizeTickTimeSeconds(source.time ?? source.timestamp ?? source.datetime ?? source.date ?? source.t);
       const open = Number(source.open ?? source.o);
       const high = Number(source.high ?? source.h);
       const low = Number(source.low ?? source.l);
@@ -110,11 +110,12 @@ export function normalizeProviderTick(payload: unknown): MarketTick | null {
   }
 
   const time = normalizeTickTimeSeconds(source.time ?? source.timestamp ?? source.t ?? source.serverTime);
-  const bid = toOptionalNumber(source.bid ?? source.b);
-  const ask = toOptionalNumber(source.ask ?? source.a);
+  const bid = toOptionalNumber(source.bid ?? source.b ?? source.bp);
+  const ask = toOptionalNumber(source.ask ?? source.a ?? source.ap);
   const last = toOptionalNumber(source.last ?? source.l);
+  const close = toOptionalNumber(source.close ?? source.c);
   const rawPrice = toOptionalNumber(source.price ?? source.p);
-  const price = rawPrice ?? last ?? bid ?? (bid && ask ? (bid + ask) / 2 : null);
+  const price = rawPrice ?? last ?? close ?? (bid !== undefined && ask !== undefined ? (bid + ask) / 2 : bid ?? ask ?? null);
 
   if (!time || !price) {
     return null;

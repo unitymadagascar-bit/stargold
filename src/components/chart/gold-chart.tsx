@@ -256,9 +256,9 @@ export function GoldChart({
 
       {!candles.length ? (
         <div className="pointer-events-none absolute inset-x-6 top-56 rounded-lg border border-amber-300/25 bg-black/80 p-5 text-center shadow-2xl backdrop-blur">
-          <p className="text-sm font-semibold text-amber-100">Aucune bougie live reçue</p>
+          <p className="text-sm font-semibold text-amber-100">Connexion au marche XAUUSD</p>
           <p className="mt-2 text-sm leading-6 text-slate-300">
-            Configure `NEXT_PUBLIC_XAUUSD_TICK_STREAM_URL` avec ton bridge MT5 ou provider WebSocket/SSE. Le graphique final ne génère plus de bougies mock.
+            L'app charge EODHD cote serveur, puis bascule sur WebSocket ou polling reel. Si rien ne s'affiche, verifie que `EODHD_API_TOKEN` est valide et autorise le marche XAUUSD.
           </p>
         </div>
       ) : null}

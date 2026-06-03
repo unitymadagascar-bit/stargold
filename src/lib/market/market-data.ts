@@ -1,5 +1,6 @@
 import type { Candle, MarketTick, Timeframe } from "@/types";
 import { fetchEodhdHistory, fetchEodhdTick, getEodhdRestSymbol, getEodhdSourceLabel } from "@/lib/market/eodhd-market";
+import { getMt5History, getMt5Tick } from "@/lib/market/mt5-store";
 import { fetchYahooGoldHistory, fetchYahooGoldTick, getYahooGoldSymbol, getYahooSourceLabel } from "@/lib/market/yahoo-market";
 
 export interface MarketDataResult<T> {
@@ -10,6 +11,21 @@ export interface MarketDataResult<T> {
 }
 
 export async function fetchMarketHistory(timeframe: Timeframe, limit: number): Promise<MarketDataResult<Candle[]>> {
+  const mt5 = getMt5History(timeframe, limit);
+
+  if (mt5) {
+    return {
+      data: mt5.data,
+      provider: mt5.provider,
+      symbol: mt5.symbol,
+      warning: null,
+    };
+  }
+
+  if (!isExternalFallbackEnabled()) {
+    throw new Error("MT5 non connecte. Lance le bridge TradeTSR dans MT5 pour synchroniser les bougies avec ton broker.");
+  }
+
   try {
     const data = await fetchEodhdHistory(timeframe, limit);
 
@@ -36,6 +52,21 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
 }
 
 export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
+  const mt5 = getMt5Tick();
+
+  if (mt5) {
+    return {
+      data: mt5.data,
+      provider: mt5.provider,
+      symbol: mt5.symbol,
+      warning: null,
+    };
+  }
+
+  if (!isExternalFallbackEnabled()) {
+    throw new Error("MT5 non connecte. Lance le bridge TradeTSR dans MT5 pour synchroniser le prix avec ton broker.");
+  }
+
   try {
     const data = await fetchEodhdTick();
 
@@ -59,4 +90,8 @@ export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isExternalFallbackEnabled() {
+  return process.env.ALLOW_EXTERNAL_GOLD_FALLBACK === "true";
 }

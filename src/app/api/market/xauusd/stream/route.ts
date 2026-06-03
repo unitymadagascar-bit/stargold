@@ -44,7 +44,7 @@ export async function GET() {
       });
 
       pushTick();
-      timer = setInterval(pushTick, 3000);
+      timer = setInterval(pushTick, 750);
     },
     cancel() {
       closed = true;

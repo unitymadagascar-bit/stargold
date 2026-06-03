@@ -239,6 +239,24 @@ export function useLiveXauusd(): LiveMarketState {
       };
       eventSource.addEventListener("message", handleEventSourceMessage);
       eventSource.addEventListener("tick", handleEventSourceMessage);
+      eventSource.addEventListener("market-error", (event) => {
+        const messageEvent = event as MessageEvent;
+
+        try {
+          const payload = JSON.parse(messageEvent.data);
+          setState((current) => ({
+            ...current,
+            status: current.lastTick ? "reconnecting" : "error",
+            message: payload?.message ?? "MT5 non connecte.",
+          }));
+        } catch {
+          setState((current) => ({
+            ...current,
+            status: current.lastTick ? "reconnecting" : "error",
+            message: "MT5 non connecte.",
+          }));
+        }
+      });
       eventSource.addEventListener("error", () => {
         close?.();
         startPolling();

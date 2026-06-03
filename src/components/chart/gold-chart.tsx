@@ -256,9 +256,9 @@ export function GoldChart({
 
       {!candles.length ? (
         <div className="pointer-events-none absolute inset-x-6 top-56 rounded-lg border border-amber-300/25 bg-black/80 p-5 text-center shadow-2xl backdrop-blur">
-          <p className="text-sm font-semibold text-amber-100">Connexion au marche XAUUSD</p>
+          <p className="text-sm font-semibold text-amber-100">Connexion au bridge MT5</p>
           <p className="mt-2 text-sm leading-6 text-slate-300">
-            L'app charge EODHD cote serveur, puis bascule sur WebSocket ou polling reel. Si rien ne s'affiche, verifie que `EODHD_API_TOKEN` est valide et autorise le marche XAUUSD.
+            Lance `mt5/TradeTSRBridge.mq5` sur le graphique XAUUSD dans MT5. L'app affichera uniquement les bougies de ton broker pour rester synchronisee.
           </p>
         </div>
       ) : null}

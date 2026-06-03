@@ -10,6 +10,12 @@ export type StructureState = "bullish" | "bearish" | "range" | "BOS" | "CHoCH";
 
 export type VolatilityState = "calme" | "normale" | "volatile" | "trop dangereuse";
 
+export type EconomicImpact = "red" | "orange" | "yellow";
+
+export type FundamentalBias = "bullish-gold" | "bearish-gold" | "neutral";
+
+export type FundamentalRecommendation = "Trader" | "Attendre" | "Eviter";
+
 export interface Candle {
   time: number;
   open: number;
@@ -79,6 +85,43 @@ export interface NewsEvent {
   minutesAway: number;
 }
 
+export interface EconomicNewsEvent {
+  id: string;
+  name: string;
+  currency: string;
+  dateTime: string;
+  impact: EconomicImpact;
+  actual: string;
+  forecast: string;
+  previous: string;
+  source: string;
+  notes: string;
+}
+
+export interface DxyContext {
+  direction: "rising" | "falling" | "range" | "unknown";
+  strength: "strong" | "moderate" | "weak";
+  value: number | null;
+  source: string;
+  updatedAt: string | null;
+}
+
+export interface FundamentalContext {
+  mode: "api" | "manual";
+  source: string;
+  updatedAt: string | null;
+  events: EconomicNewsEvent[];
+  nextHighImpactEvent: EconomicNewsEvent | null;
+  caution: boolean;
+  cautionMessage: string | null;
+  usdInterpretation: string;
+  goldInterpretation: string;
+  newsBias: FundamentalBias;
+  dxy: DxyContext;
+  riskLevel: "faible" | "modere" | "eleve";
+  recommendation: FundamentalRecommendation;
+}
+
 export interface TimeframeAnalysis {
   timeframe: Timeframe;
   signal: Signal;
@@ -103,6 +146,11 @@ export interface ScoringBreakdown {
   fundamental: number;
   risk: number;
   total: number;
+  priceAction?: number;
+  marketStructure?: number;
+  dxy?: number;
+  news?: number;
+  volatilityRisk?: number;
 }
 
 export interface TradePlan {

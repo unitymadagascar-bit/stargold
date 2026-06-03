@@ -1,8 +1,9 @@
-import type { Candle, Direction, MacroContext, NewsEvent, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { Candle, Direction, FundamentalContext, MacroContext, NewsEvent, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { analyzeCandles } from "@/lib/analysis/market-structure";
 import { timeframes } from "@/lib/market/timeframes";
 import { calculateRiskReward, calculateLotSize } from "@/lib/risk/risk";
-import { calculateConfluenceScore, generateFinalDecision, inferDirection } from "@/lib/scoring/confluence";
+import { generateFinalDecision, inferDirection } from "@/lib/scoring/confluence";
+import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDecisionStrength, hasRequiredTechnicalConfirmation } from "@/lib/fundamentals/decision-score";
 
 const MIN_ANALYSIS_CANDLES = 30;
 
@@ -12,10 +13,12 @@ export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
 
 export function buildLiveTimeframeAnalyses({
   candleMap,
+  fundamental,
   macro,
   news,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
+  fundamental: FundamentalContext;
   macro: MacroContext;
   news: NewsEvent[];
 }): TimeframeAnalysis[] {
@@ -48,13 +51,11 @@ export function buildLiveTimeframeAnalyses({
     const stopLoss = getStopLoss(direction, price, analysis.support, analysis.resistance, analysis.atr);
     const target = direction === "Bearish" ? price - Math.abs(price - stopLoss) * 2 : price + Math.abs(price - stopLoss) * 2;
     const riskReward = calculateRiskReward(price, stopLoss, target);
-    const scoring = calculateConfluenceScore({
+    const scoring = calculateFundamentalDecisionScore({
       analysis,
-      macro,
-      news,
+      direction,
+      fundamental,
       riskReward,
-      spreadAcceptable: analysis.volatility !== "trop dangereuse",
-      stopLossLogical: Math.abs(price - stopLoss) > Math.max(analysis.atr * 0.4, 0.2),
     });
     const confirmations = [
       analysis.structure === "BOS" || analysis.structure === "CHoCH",
@@ -66,13 +67,18 @@ export function buildLiveTimeframeAnalyses({
 
     return {
       timeframe,
-      signal: generateFinalDecision({
-        direction,
+      signal: applyFundamentalDecisionGuard({
+        baseDecision: generateFinalDecision({
+          direction,
+          score: scoring.total,
+          riskReward,
+          volatility: analysis.volatility,
+          dangerousNews: news.some((event) => event.impact === "high" && event.minutesAway <= 30) || fundamental.caution,
+          confirmations,
+        }),
+        fundamental,
+        hasTechnicalConfirmation: hasRequiredTechnicalConfirmation(analysis),
         score: scoring.total,
-        riskReward,
-        volatility: analysis.volatility,
-        dangerousNews: news.some((event) => event.impact === "high" && event.minutesAway <= 30),
-        confirmations,
       }),
       score: scoring.total,
       trend: analysis.trend,
@@ -86,17 +92,19 @@ export function buildLiveTimeframeAnalyses({
       volatility: analysis.volatility,
       newsNearby: news.some((event) => event.impact === "high" && event.minutesAway <= 30),
       riskReward: Number(riskReward.toFixed(2)),
-      summary: scoring.total >= 70 ? "Confluence live exploitable avec confirmation." : "Confluence live incomplète.",
+      summary: `${getDecisionStrength(scoring.total)}. ${fundamental.cautionMessage ?? "Fondamental intégré au score."}`,
     };
   });
 }
 
 export function buildLiveTradePlan({
   candleMap,
+  fundamental,
   macro,
   news,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
+  fundamental: FundamentalContext;
   macro: MacroContext;
   news: NewsEvent[];
 }): TradePlan {
@@ -126,13 +134,11 @@ export function buildLiveTradePlan({
   const stopLoss = getStopLoss(direction, price, analysis.support, analysis.resistance, riskUnit);
   const takeProfits = getTakeProfits(direction, price, Math.abs(price - stopLoss));
   const riskReward = calculateRiskReward(price, stopLoss, takeProfits[0]);
-  const scoring = calculateConfluenceScore({
+  const scoring = calculateFundamentalDecisionScore({
     analysis,
-    macro,
-    news,
+    direction,
+    fundamental,
     riskReward,
-    spreadAcceptable: analysis.volatility !== "trop dangereuse",
-    stopLossLogical: true,
   });
   const confirmations = [
     analysis.structure === "BOS" || analysis.structure === "CHoCH",
@@ -141,20 +147,25 @@ export function buildLiveTradePlan({
     analysis.displacement,
     analysis.ema20 !== analysis.ema50,
   ].filter(Boolean).length;
-  const decision = generateFinalDecision({
-    direction,
+  const decision = applyFundamentalDecisionGuard({
+    baseDecision: generateFinalDecision({
+      direction,
+      score: scoring.total,
+      riskReward,
+      volatility: analysis.volatility,
+      dangerousNews: news.some((event) => event.impact === "high" && event.minutesAway <= 30) || fundamental.caution,
+      confirmations,
+    }),
+    fundamental,
+    hasTechnicalConfirmation: hasRequiredTechnicalConfirmation(analysis),
     score: scoring.total,
-    riskReward,
-    volatility: analysis.volatility,
-    dangerousNews: news.some((event) => event.impact === "high" && event.minutesAway <= 30),
-    confirmations,
   });
 
   return {
     direction,
     decision,
     score: scoring.total,
-    summary: summarizeDecision(decision, direction),
+    summary: `${summarizeDecision(decision, direction)} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
     entry: round(price),
     stopLoss: round(stopLoss),
     takeProfits: takeProfits.map(round) as [number, number, number],
@@ -164,6 +175,7 @@ export function buildLiveTradePlan({
       analysis.liquiditySweep ? "Liquidity sweep détecté sur les bougies live." : "Pas de sweep confirmé pour l'instant.",
       analysis.retestConfirmed ? "Retest propre confirmé." : "Retest encore en attente.",
       analysis.volatility === "trop dangereuse" ? "Volatilité trop dangereuse : rester en attente." : `Volatilité ${analysis.volatility}.`,
+      fundamental.usdInterpretation,
     ],
     scoring,
   };

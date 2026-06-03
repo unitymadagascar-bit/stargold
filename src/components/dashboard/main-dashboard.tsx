@@ -5,23 +5,29 @@ import type { ReactNode } from "react";
 import { Activity, AlertTriangle, Clock, Gauge, LineChart, Radio, ShieldCheck, Target } from "lucide-react";
 import type { Timeframe } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
+import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { RiskPanel } from "@/components/risk-management/risk-panel";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { SignalBadge } from "@/components/ui/signal-badge";
 import { TimeframeGrid } from "@/components/timeframe-cards/timeframe-grid";
 import { TradeChecklist } from "@/components/dashboard/trade-checklist";
+import { useFundamentalContext } from "@/hooks/use-fundamental-context";
 import { useLiveXauusd } from "@/hooks/use-live-xauusd";
 import { buildLiveTimeframeAnalyses, buildLiveTradePlan, getLatestPrice } from "@/lib/analysis/live-analysis";
 import { macroContext, newsEvents } from "@/lib/static-context";
 
 export function MainDashboard() {
   const live = useLiveXauusd();
+  const fundamentals = useFundamentalContext();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, macro: macroContext, news: newsEvents }),
-    [live.candleMap],
+    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, news: newsEvents }),
+    [fundamentals.fundamental, live.candleMap],
   );
-  const plan = useMemo(() => buildLiveTradePlan({ candleMap: live.candleMap, macro: macroContext, news: newsEvents }), [live.candleMap]);
+  const plan = useMemo(
+    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, news: newsEvents }),
+    [fundamentals.fundamental, live.candleMap],
+  );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
   const activeAnalysis = timeframeAnalyses.find((item) => item.timeframe === activeTimeframe);
@@ -91,6 +97,14 @@ export function MainDashboard() {
               <SetupMetric label="Sweep" value={activeAnalysis?.liquiditySweep ? "confirmé" : "attente"} />
               <SetupMetric label="Retest" value={activeAnalysis?.retestConfirmed ? "confirmé" : "attente"} />
             </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <SetupMetric label="Price Action" value={`${plan.scoring.priceAction ?? plan.scoring.technical}/40`} />
+              <SetupMetric label="Structure" value={`${plan.scoring.marketStructure ?? plan.scoring.orderFlow}/20`} />
+              <SetupMetric label="DXY" value={`${plan.scoring.dxy ?? 0}/15`} />
+              <SetupMetric label="News USD" value={`${plan.scoring.news ?? 0}/15`} />
+              <SetupMetric label="Risque" value={`${plan.scoring.volatilityRisk ?? plan.scoring.risk}/10`} />
+              <SetupMetric label="Total" value={`${plan.score}/100`} />
+            </div>
           </section>
 
           <TradeChecklist />
@@ -103,6 +117,16 @@ export function MainDashboard() {
               </p>
             </div>
           </section>
+
+          <FundamentalPanel
+            apiError={fundamentals.apiError}
+            fundamental={fundamentals.fundamental}
+            manualEvents={fundamentals.manualEvents}
+            onAddManualEvent={fundamentals.addManualEvent}
+            onImportManualEvents={fundamentals.importManualEvents}
+            onRemoveManualEvent={fundamentals.removeManualEvent}
+            onUpdateDxy={fundamentals.updateDxy}
+          />
         </aside>
       </section>
 
@@ -128,7 +152,7 @@ export function MainDashboard() {
         <ExecutionBlock title="RR / lot size" icon={<Gauge size={18} />}>
           <BlockRow label="Risk/Reward" value={plan.riskReward ? `1:${plan.riskReward.toFixed(2)}` : "--"} />
           <BlockRow label="Lot size" value={plan.lotSize ? plan.lotSize.toFixed(2) : "--"} />
-          <BlockRow label="Score risque" value={`${plan.scoring.risk}/20`} />
+          <BlockRow label="Score risque" value={`${plan.scoring.volatilityRisk ?? plan.scoring.risk}/10`} />
         </ExecutionBlock>
       </section>
 

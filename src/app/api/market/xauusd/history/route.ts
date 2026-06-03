@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { Timeframe } from "@/types";
-import { fetchEodhdHistory, getEodhdRestSymbol, getEodhdSourceLabel } from "@/lib/market/eodhd-market";
+import { fetchMarketHistory } from "@/lib/market/market-data";
 import { timeframes } from "@/lib/market/timeframes";
 
 export const dynamic = "force-dynamic";
@@ -16,21 +16,22 @@ export async function GET(request: Request) {
   }
 
   try {
-    const candles = await fetchEodhdHistory(timeframe as Timeframe, limit);
+    const result = await fetchMarketHistory(timeframe as Timeframe, limit);
 
     return NextResponse.json({
-      source: getEodhdSourceLabel(),
-      symbol: getEodhdRestSymbol(),
+      source: result.provider,
+      symbol: result.symbol,
       timeframe,
       updatedAt: new Date().toISOString(),
-      candles,
+      warning: result.warning,
+      candles: result.data,
     });
   } catch (error) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Historique XAUUSD indisponible.",
-        source: getEodhdSourceLabel(),
-        symbol: getEodhdRestSymbol(),
+        source: "unavailable",
+        symbol: "XAUUSD",
         timeframe,
         updatedAt: new Date().toISOString(),
         candles: [],

@@ -57,11 +57,13 @@ export function useLiveXauusd(): LiveMarketState {
   }
 
   function processMessage(data: unknown, message?: string) {
+    const marketMessage = message ?? getMarketMessage(data);
+
     if (Array.isArray(data)) {
       for (const item of data) {
         const tick = normalizeProviderTick(item);
         if (tick) {
-          processTick(tick, message);
+          processTick(tick, marketMessage);
         }
       }
       return;
@@ -69,7 +71,7 @@ export function useLiveXauusd(): LiveMarketState {
 
     const tick = normalizeProviderTick(data);
     if (tick) {
-      processTick(tick, message);
+      processTick(tick, marketMessage);
     }
   }
 
@@ -77,8 +79,10 @@ export function useLiveXauusd(): LiveMarketState {
     let disposed = false;
 
     async function loadHistory() {
-      const results = await Promise.allSettled(
-        timeframes.map(async (timeframe) => {
+      const results: Array<readonly [Timeframe, Candle[]]> = [];
+
+      for (const timeframe of timeframes) {
+        try {
           const url = new URL(historyUrl, window.location.origin);
           url.searchParams.set("symbol", "XAUUSD");
           url.searchParams.set("timeframe", timeframe);
@@ -89,9 +93,12 @@ export function useLiveXauusd(): LiveMarketState {
             throw new Error(`History ${timeframe}: ${response.status}`);
           }
 
-          return [timeframe, normalizeHistoryCandles(await response.json())] as const;
-        }),
-      );
+          results.push([timeframe, normalizeHistoryCandles(await response.json())] as const);
+          await wait(120);
+        } catch {
+          await wait(350);
+        }
+      }
 
       if (disposed) {
         return;
@@ -100,9 +107,7 @@ export function useLiveXauusd(): LiveMarketState {
       setState((current) => {
         const candleMap = { ...current.candleMap };
         for (const result of results) {
-          if (result.status === "fulfilled") {
-            candleMap[result.value[0]] = result.value[1];
-          }
+          candleMap[result[0]] = result[1];
         }
 
         const loadedCount = Object.values(candleMap).reduce((total, candles) => total + candles.length, 0);
@@ -161,7 +166,7 @@ export function useLiveXauusd(): LiveMarketState {
           throw new Error(payload?.error ?? `Tick HTTP ${response.status}`);
         }
 
-        processMessage(payload, "Flux EODHD HTTP actif. WebSocket indisponible ou non autorise.");
+        processMessage(payload);
       } catch (error) {
         if (!disposed) {
           setState((current) => ({
@@ -255,4 +260,23 @@ export function useLiveXauusd(): LiveMarketState {
   }, []);
 
   return useMemo(() => state, [state]);
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getMarketMessage(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return "Flux XAUUSD live connecte.";
+  }
+
+  const source = "source" in data ? String(data.source) : "marché";
+  const warning = "warning" in data && data.warning ? String(data.warning) : "";
+
+  if (warning) {
+    return `Flux reel ${source} actif. ${warning}`;
+  }
+
+  return `Flux reel ${source} actif.`;
 }

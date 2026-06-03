@@ -1,25 +1,26 @@
 import { NextResponse } from "next/server";
-import { fetchEodhdTick, getEodhdRestSymbol, getEodhdSourceLabel } from "@/lib/market/eodhd-market";
+import { fetchMarketTick } from "@/lib/market/market-data";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET() {
   try {
-    const tick = await fetchEodhdTick();
+    const result = await fetchMarketTick();
 
     return NextResponse.json({
-      source: getEodhdSourceLabel(),
-      symbol: getEodhdRestSymbol(),
+      source: result.provider,
+      symbol: result.symbol,
       updatedAt: new Date().toISOString(),
-      tick,
+      warning: result.warning,
+      tick: result.data,
     });
   } catch (error) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Tick XAUUSD indisponible.",
-        source: getEodhdSourceLabel(),
-        symbol: getEodhdRestSymbol(),
+        source: "unavailable",
+        symbol: "XAUUSD",
         updatedAt: new Date().toISOString(),
         tick: null,
       },

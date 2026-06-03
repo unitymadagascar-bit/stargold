@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, Crosshair, Gauge, Minus, Plus, RotateCcw, ShieldAlert, Target, Wifi, WifiOff, Zap } from "lucide-react";
+import { AlertTriangle, Crosshair, Gauge, Minus, Plus, RotateCcw, Settings2, ShieldAlert, Target, Wifi, WifiOff, Zap } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
@@ -13,13 +13,30 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, LiveConnectionStatus, OrderBlockZone, Timeframe, TradePlan } from "@/types";
+import type { Candle, LiveConnectionStatus, MarketTick, OrderBlockZone, Timeframe, TradePlan } from "@/types";
 import { timeframes } from "@/lib/market/timeframes";
+
+const defaultDisplaySettings: ChartDisplaySettings = {
+  showTicker: true,
+  showOhlc: true,
+  showQuickTimeframes: true,
+  showBidPriceLine: true,
+  showAskPriceLine: false,
+  showLastPriceLine: false,
+  showPeriodSeparators: false,
+  showGrid: true,
+  showTradeLevels: false,
+  showOrderBlocks: true,
+  showLiquidityLevels: false,
+  showLegend: false,
+  showEmptyHelper: true,
+};
 
 export function GoldChart({
   candleMap,
   connectionMessage,
   connectionStatus,
+  lastTick,
   orderBlock,
   onTimeframeChange,
   plan,
@@ -28,6 +45,7 @@ export function GoldChart({
   candleMap: Record<Timeframe, Candle[]>;
   connectionMessage: string;
   connectionStatus: LiveConnectionStatus;
+  lastTick: MarketTick | null;
   orderBlock?: OrderBlockZone | null;
   onTimeframeChange: (timeframe: Timeframe) => void;
   plan: TradePlan;
@@ -36,6 +54,19 @@ export function GoldChart({
   const candles = candleMap[timeframe];
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
+    if (typeof window === "undefined") {
+      return defaultDisplaySettings;
+    }
+
+    try {
+      const saved = window.localStorage.getItem("tradetsr-chart-display");
+      return saved ? { ...defaultDisplaySettings, ...JSON.parse(saved) } : defaultDisplaySettings;
+    } catch {
+      return defaultDisplaySettings;
+    }
+  });
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -46,6 +77,7 @@ export function GoldChart({
 
   const latestCandle = candles.at(-1) ?? null;
   latestCandleRef.current = latestCandle;
+  const lastPrice = lastTick?.price ?? latestCandle?.close ?? 0;
   const chartData = useMemo<CandlestickData[]>(
     () =>
       candles.map((candle) => ({
@@ -170,6 +202,19 @@ export function GoldChart({
   }, [candles.length, chartData, latestCandle, timeframe]);
 
   useEffect(() => {
+    window.localStorage.setItem("tradetsr-chart-display", JSON.stringify(displaySettings));
+  }, [displaySettings]);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions({
+      grid: {
+        vertLines: { color: displaySettings.showGrid || displaySettings.showPeriodSeparators ? "rgba(75, 85, 99, 0.22)" : "transparent" },
+        horzLines: { color: displaySettings.showGrid ? "rgba(75, 85, 99, 0.22)" : "transparent" },
+      },
+    });
+  }, [displaySettings.showGrid, displaySettings.showPeriodSeparators]);
+
+  useEffect(() => {
     const series = seriesRef.current;
     if (!series) {
       return;
@@ -182,27 +227,41 @@ export function GoldChart({
 
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
 
-    addPriceLine(series, priceLineRefs.current, plan.entry, "#facc15", "Entry");
-    addPriceLine(series, priceLineRefs.current, plan.stopLoss, "#fb7185", "SL");
-    plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
+    if (displaySettings.showBidPriceLine) {
+      addPriceLine(series, priceLineRefs.current, lastTick?.bid ?? 0, "#38bdf8", "Bid");
+    }
 
-    if (activeOrderBlock) {
+    if (displaySettings.showAskPriceLine) {
+      addPriceLine(series, priceLineRefs.current, lastTick?.ask ?? 0, "#f97316", "Ask");
+    }
+
+    if (displaySettings.showLastPriceLine) {
+      addPriceLine(series, priceLineRefs.current, lastPrice, "#eab308", "Last");
+    }
+
+    if (displaySettings.showTradeLevels) {
+      addPriceLine(series, priceLineRefs.current, plan.entry, "#facc15", "Entry");
+      addPriceLine(series, priceLineRefs.current, plan.stopLoss, "#fb7185", "SL");
+      plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
+    }
+
+    if (displaySettings.showOrderBlocks && activeOrderBlock) {
       const color = activeOrderBlock.direction === "bullish" ? "#22c55e" : "#ef4444";
       addPriceLine(series, priceLineRefs.current, activeOrderBlock.high, color, `OB ${activeOrderBlock.score}/100`);
       addPriceLine(series, priceLineRefs.current, activeOrderBlock.low, color, activeOrderBlock.strength);
     }
 
-    if (candles.length) {
+    if (displaySettings.showLiquidityLevels && candles.length) {
       addPriceLine(series, priceLineRefs.current, Math.min(...candles.slice(-160).map((candle) => candle.low)), "#38bdf8", "Support");
       addPriceLine(series, priceLineRefs.current, Math.max(...candles.slice(-160).map((candle) => candle.high)), "#f59e0b", "Resistance");
     }
-  }, [candles, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
+  }, [candles, displaySettings, lastPrice, lastTick?.ask, lastTick?.bid, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
 
   useEffect(() => {
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
     const series = seriesRef.current;
 
-    if (!series || !activeOrderBlock) {
+    if (!series || !activeOrderBlock || !displaySettings.showOrderBlocks) {
       setOrderBlockOverlay(null);
       return;
     }
@@ -233,7 +292,7 @@ export function GoldChart({
     return () => {
       chartRef.current?.unsubscribeCrosshairMove(updateOverlay);
     };
-  }, [candles.length, orderBlock, plan.orderBlock, timeframe]);
+  }, [candles.length, displaySettings.showOrderBlocks, orderBlock, plan.orderBlock, timeframe]);
 
   function zoom(factor: number) {
     const timeScale = chartRef.current?.timeScale();
@@ -250,33 +309,46 @@ export function GoldChart({
   return (
     <section className="relative rounded-md border border-white/10 bg-[#171717] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
-        <div className="flex items-center gap-3">
-          <div className="grid size-10 place-items-center rounded-md bg-amber-300/10 text-amber-200">
-            {connectionStatus === "live" ? <Wifi size={18} /> : <WifiOff size={18} />}
+        {displaySettings.showTicker ? (
+          <div className="flex items-center gap-3">
+            <div className="grid size-10 place-items-center rounded-md bg-amber-300/10 text-amber-200">
+              {connectionStatus === "live" ? <Wifi size={18} /> : <WifiOff size={18} />}
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-white">XAUUSD live chart</h2>
+              <p className="text-xs text-slate-400">{connectionMessage}</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-base font-semibold text-white">XAUUSD live chart</h2>
-            <p className="text-xs text-slate-400">{connectionMessage}</p>
-          </div>
-        </div>
+        ) : (
+          <div />
+        )}
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {timeframes.map((item) => (
-            <button
-              key={item}
-              className={`h-8 rounded border px-2.5 text-xs font-semibold ${
-                timeframe === item ? "border-amber-300/50 bg-amber-300/15 text-amber-100" : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"
-              }`}
-              type="button"
-              onClick={() => onTimeframeChange(item)}
-            >
-              {item}
-            </button>
-          ))}
+          {displaySettings.showQuickTimeframes
+            ? timeframes.map((item) => (
+                <button
+                  key={item}
+                  className={`h-8 rounded border px-2.5 text-xs font-semibold ${
+                    timeframe === item ? "border-amber-300/50 bg-amber-300/15 text-amber-100" : "border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"
+                  }`}
+                  type="button"
+                  onClick={() => onTimeframeChange(item)}
+                >
+                  {item}
+                </button>
+              ))
+            : null}
+          <div className="relative">
+            <IconButton label="Options d'affichage" onClick={() => setSettingsOpen((value) => !value)}>
+              <Settings2 size={16} />
+            </IconButton>
+            {settingsOpen ? <DisplaySettingsPanel settings={displaySettings} onChange={setDisplaySettings} onClose={() => setSettingsOpen(false)} /> : null}
+          </div>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-black/30 px-3 py-2">
+      {displaySettings.showOhlc ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-white/10 bg-black/30 px-3 py-2">
         <div className="flex flex-wrap gap-3 font-mono text-xs text-slate-300">
           <span>O {formatPrice(ohlc?.open)}</span>
           <span>H {formatPrice(ohlc?.high)}</span>
@@ -299,6 +371,7 @@ export function GoldChart({
           </IconButton>
         </div>
       </div>
+      ) : null}
 
       <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
         <div ref={containerRef} className="h-full w-full" />
@@ -320,9 +393,10 @@ export function GoldChart({
             </span>
           </div>
         ) : null}
-        {!candles.length ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
+        {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
+      {displaySettings.showLegend ? (
       <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-5">
         <Legend color="bg-sky-400" label="Support live" />
         <Legend color="bg-amber-400" label="Resistance / liquidité" />
@@ -330,7 +404,69 @@ export function GoldChart({
         <Legend color="bg-rose-400" label="Stop loss" />
         <Legend color="bg-emerald-400" label="Take profits" />
       </div>
+      ) : null}
     </section>
+  );
+}
+
+function DisplaySettingsPanel({
+  onChange,
+  onClose,
+  settings,
+}: {
+  onChange: (settings: ChartDisplaySettings) => void;
+  onClose: () => void;
+  settings: ChartDisplaySettings;
+}) {
+  function update(key: keyof ChartDisplaySettings, value: boolean) {
+    onChange({ ...settings, [key]: value });
+  }
+
+  return (
+    <div className="absolute right-0 top-10 z-30 w-72 rounded-md border border-white/15 bg-[#101419] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
+      <div className="mb-2 flex items-center justify-between gap-3 border-b border-white/10 pb-2">
+        <div>
+          <p className="text-sm font-semibold text-white">Affichage</p>
+          <p className="text-[11px] text-slate-500">Choisis ce qui reste visible sur le chart.</p>
+        </div>
+        <button className="text-xs text-slate-400 transition hover:text-white" type="button" onClick={onClose}>
+          Fermer
+        </button>
+      </div>
+
+      <div className="grid gap-1.5 text-sm text-slate-200">
+        <DisplayToggle checked={settings.showTicker} label="Show ticker" onChange={(value) => update("showTicker", value)} />
+        <DisplayToggle checked={settings.showOhlc} label="Show OHLC" onChange={(value) => update("showOhlc", value)} />
+        <DisplayToggle checked={settings.showQuickTimeframes} label="Show quick timeframe buttons" onChange={(value) => update("showQuickTimeframes", value)} />
+        <DisplayToggle checked={settings.showBidPriceLine} label="Show bid price line" onChange={(value) => update("showBidPriceLine", value)} />
+        <DisplayToggle checked={settings.showAskPriceLine} label="Show ask price line" onChange={(value) => update("showAskPriceLine", value)} />
+        <DisplayToggle checked={settings.showLastPriceLine} label="Show last price line" onChange={(value) => update("showLastPriceLine", value)} />
+        <DisplayToggle checked={settings.showPeriodSeparators} label="Show period separators" onChange={(value) => update("showPeriodSeparators", value)} />
+        <DisplayToggle checked={settings.showGrid} label="Show grid" onChange={(value) => update("showGrid", value)} />
+        <DisplayToggle checked={settings.showLiquidityLevels} label="Show liquidity/support levels" onChange={(value) => update("showLiquidityLevels", value)} />
+        <DisplayToggle checked={settings.showOrderBlocks} label="Show order block zones" onChange={(value) => update("showOrderBlocks", value)} />
+        <DisplayToggle checked={settings.showTradeLevels} label="Show trade levels" onChange={(value) => update("showTradeLevels", value)} />
+        <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
+        <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
+      </div>
+
+      <button
+        className="mt-3 w-full rounded border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+        type="button"
+        onClick={() => onChange(defaultDisplaySettings)}
+      >
+        Reset affichage
+      </button>
+    </div>
+  );
+}
+
+function DisplayToggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 transition hover:bg-white/[0.04]">
+      <input className="size-4 accent-amber-300" type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
   );
 }
 
@@ -450,6 +586,22 @@ interface OrderBlockOverlay {
   background: string;
   border: string;
   label: string;
+}
+
+interface ChartDisplaySettings {
+  showTicker: boolean;
+  showOhlc: boolean;
+  showQuickTimeframes: boolean;
+  showBidPriceLine: boolean;
+  showAskPriceLine: boolean;
+  showLastPriceLine: boolean;
+  showPeriodSeparators: boolean;
+  showGrid: boolean;
+  showTradeLevels: boolean;
+  showOrderBlocks: boolean;
+  showLiquidityLevels: boolean;
+  showLegend: boolean;
+  showEmptyHelper: boolean;
 }
 
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {

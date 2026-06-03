@@ -65,6 +65,7 @@ export function MainDashboard() {
             candleMap={live.candleMap}
             connectionMessage={live.message}
             connectionStatus={live.status}
+            lastTick={live.lastTick}
             orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock}
             plan={plan}
             timeframe={activeTimeframe}

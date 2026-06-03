@@ -7,6 +7,7 @@ import type { Timeframe } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { RiskPanel } from "@/components/risk-management/risk-panel";
+import { ScoreDetail } from "@/components/dashboard/score-detail";
 import { ScoreBar } from "@/components/ui/score-bar";
 import { SignalBadge } from "@/components/ui/signal-badge";
 import { TimeframeGrid } from "@/components/timeframe-cards/timeframe-grid";
@@ -106,6 +107,15 @@ export function MainDashboard() {
               <SetupMetric label="Total" value={`${plan.score}/100`} />
             </div>
           </section>
+
+          <ScoreDetail
+            activeAnalysis={activeAnalysis}
+            analyses={timeframeAnalyses}
+            fundamental={fundamentals.fundamental}
+            plan={plan}
+            price={latestPrice}
+            spread={spread}
+          />
 
           <TradeChecklist />
 

@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, AlertTriangle, Clock, Gauge, LineChart, Radio, ShieldCheck, Target } from "lucide-react";
-import type { LiquidityAnalysis, OrderBlockZone, SignalMode, Timeframe } from "@/types";
+import { Activity, AlertTriangle, Clock, Gauge, LineChart, Radio, ShieldCheck, Target, Zap } from "lucide-react";
+import type { LiquidityAnalysis, OrderBlockZone, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { RiskPanel } from "@/components/risk-management/risk-panel";
@@ -102,6 +102,7 @@ export function MainDashboard() {
               </div>
               <SignalBadge signal={activeAnalysis?.signal ?? "WAIT"} />
             </div>
+            <SignalModePanel activeAnalysis={activeAnalysis} mode={signalMode} onModeChange={setSignalMode} plan={plan} />
             <p className="mt-3 text-sm leading-6 text-slate-300">{plan.summary}</p>
             <div className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-3">
               <p className="text-sm font-semibold text-sky-100">{activeAnalysis?.waitReason ?? plan.waitReason}</p>
@@ -226,6 +227,54 @@ function ModeButton({ active, label, onClick }: { active: boolean; label: string
     >
       {label}
     </button>
+  );
+}
+
+function SignalModePanel({
+  activeAnalysis,
+  mode,
+  onModeChange,
+  plan,
+}: {
+  activeAnalysis?: TimeframeAnalysis;
+  mode: SignalMode;
+  onModeChange: (mode: SignalMode) => void;
+  plan: TradePlan;
+}) {
+  const scalpReady = plan.decision === "BUY SCALP" || plan.decision === "SELL SCALP";
+  const missing = activeAnalysis?.missingConditions ?? plan.missingConditions;
+
+  return (
+    <section className="mt-4 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-amber-100">
+          <Zap size={17} />
+          <p className="text-sm font-semibold">Signal mode</p>
+        </div>
+        <div className="inline-flex rounded-md border border-white/10 bg-black/25 p-1">
+          <ModeButton active={mode === "conservative"} label="Conservative" onClick={() => onModeChange("conservative")} />
+          <ModeButton active={mode === "scalping"} label="Scalping" onClick={() => onModeChange("scalping")} />
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <SetupMetric label="Mode actif" value={mode === "scalping" ? "Scalping" : "Conservative"} />
+        <SetupMetric label="Scalp status" value={scalpReady ? plan.decision : "WAIT"} />
+        <SetupMetric label="Seuil scalp" value="60/100" />
+        <SetupMetric label="Timeframes" value="M1 / M5 / M15" />
+      </div>
+
+      <p className="mt-3 text-xs leading-5 text-amber-100">
+        Scalping has higher risk and requires strict stop loss.
+      </p>
+      <p className="mt-2 rounded border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+        {mode === "scalping"
+          ? missing.length
+            ? `Avant BUY/SELL SCALP: ${missing.join(", ")}`
+            : "Conditions scalp pretes."
+          : "Passe en Scalping pour activer les alertes BUY SCALP / SELL SCALP sur M1, M5 et M15."}
+      </p>
+    </section>
   );
 }
 

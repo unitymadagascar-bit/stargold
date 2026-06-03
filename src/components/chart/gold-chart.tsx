@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Crosshair, Minus, Plus, RotateCcw, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Crosshair, Gauge, Minus, Plus, RotateCcw, ShieldAlert, Target, Wifi, WifiOff, Zap } from "lucide-react";
 import {
   CandlestickSeries,
   ColorType,
@@ -320,16 +320,8 @@ export function GoldChart({
             </span>
           </div>
         ) : null}
+        {!candles.length ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
-
-      {!candles.length ? (
-        <div className="pointer-events-none absolute inset-x-6 top-56 rounded-lg border border-amber-300/25 bg-black/80 p-5 text-center shadow-2xl backdrop-blur">
-          <p className="text-sm font-semibold text-amber-100">Connexion au bridge MT5</p>
-          <p className="mt-2 text-sm leading-6 text-slate-300">
-            Lance `mt5/TradeTSRBridge.mq5` sur le graphique XAUUSD dans MT5. L'app affichera uniquement les bougies de ton broker pour rester synchronisee.
-          </p>
-        </div>
-      ) : null}
 
       <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-4">
         <Legend color="bg-sky-400" label="Support live" />
@@ -339,6 +331,93 @@ export function GoldChart({
         <Legend color="bg-emerald-400" label="Take profits" />
       </div>
     </section>
+  );
+}
+
+function ChartEmptyState({
+  connectionMessage,
+  connectionStatus,
+  plan,
+  timeframe,
+}: {
+  connectionMessage: string;
+  connectionStatus: LiveConnectionStatus;
+  plan: TradePlan;
+  timeframe: Timeframe;
+}) {
+  const live = connectionStatus === "live";
+
+  return (
+    <div className="absolute inset-0 z-20 bg-[#06080c] p-4">
+      <div className="grid h-full gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-h-0 flex-col justify-between rounded-md border border-white/10 bg-[#0b1017] p-5">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className={`grid size-10 place-items-center rounded-md ${live ? "bg-emerald-300/10 text-emerald-200" : "bg-amber-300/10 text-amber-200"}`}>
+                {live ? <Wifi size={18} /> : <WifiOff size={18} />}
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-white">Graphique {timeframe} en attente de bougies live</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{connectionMessage}</p>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-2 md:grid-cols-2">
+              <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value="Lance TradeTSRBridge sur XAUUSD" />
+              <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value="Choisis M1, M5 ou M15 pour scalp" />
+              <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value="Attends les premieres bougies broker" />
+              <EmptyStep icon={<ShieldAlert size={16} />} label="4. Risque" value="Aucun signal sans confirmation live" />
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+            <div className="flex gap-3">
+              <AlertTriangle className="mt-0.5 shrink-0 text-amber-200" size={18} />
+              <p className="text-sm leading-6 text-amber-100">
+                Le chart n'affiche pas de zone vide: il attend un flux MT5 exploitable avant de dessiner les bougies, les Order Blocks et la liquidite.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-white/10 bg-black/30 p-4">
+          <div className="flex items-center gap-2 text-amber-100">
+            <Zap size={17} />
+            <p className="text-sm font-semibold">Scalping M1/M5/M15</p>
+          </div>
+          <div className="mt-4 space-y-2 text-xs">
+            <ScalpStatus label="Mode actif" value={plan.signalMode === "scalping" ? "Scalping" : "Conservative"} active={plan.signalMode === "scalping"} />
+            <ScalpStatus label="Signal" value={plan.decision} active={plan.decision === "BUY SCALP" || plan.decision === "SELL SCALP"} />
+            <ScalpStatus label="Confiance" value={`${plan.score}/100`} active={plan.score >= 60} />
+            <ScalpStatus label="Alerte" value={plan.waitReason} active={plan.decision !== "WAIT"} />
+          </div>
+          <p className="mt-4 rounded-md border border-red-300/20 bg-red-300/10 p-3 text-xs leading-5 text-red-100">
+            Scalping has higher risk and requires strict stop loss.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyStep({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-black/25 p-3">
+      <div className="flex items-center gap-2 text-slate-300">
+        {icon}
+        <p className="text-xs font-semibold">{label}</p>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-slate-500">{value}</p>
+    </div>
+  );
+}
+
+function ScalpStatus({ active, label, value }: { active: boolean; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-3 py-2">
+      <span className="text-slate-500">{label}</span>
+      <span className={`truncate text-right font-mono font-semibold ${active ? "text-emerald-300" : "text-slate-300"}`}>{value}</span>
+    </div>
   );
 }
 

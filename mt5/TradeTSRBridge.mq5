@@ -74,10 +74,10 @@ string TickToJson(const MqlTick &tick)
 {
    string json = "{";
    json += "\"symbol\":\"XAUUSD\",";
-   json += "\"time\":" + IntegerToString((long)tick.time) + ",";
+   json += "\"time\":" + IntegerToString((long)tick.time_msc) + ",";
    json += "\"bid\":" + DoubleToString(tick.bid, _Digits) + ",";
    json += "\"ask\":" + DoubleToString(tick.ask, _Digits) + ",";
-   json += "\"price\":" + DoubleToString((tick.bid + tick.ask) / 2.0, _Digits) + ",";
+   json += "\"price\":" + DoubleToString(tick.bid, _Digits) + ",";
    json += "\"volume\":" + DoubleToString((double)tick.volume, 0);
    json += "}";
 

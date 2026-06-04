@@ -523,7 +523,7 @@ function ChartEmptyState({
           </div>
           <div className="mt-4 space-y-2 text-xs">
             <ScalpStatus label="Mode actif" value={plan.signalMode === "scalping" ? "Scalping" : "Conservative"} active={plan.signalMode === "scalping"} />
-            <ScalpStatus label="Signal" value={plan.decision} active={plan.decision === "BUY SCALP" || plan.decision === "SELL SCALP"} />
+            <ScalpStatus label="Signal" value={plan.decision} active={plan.decision !== "WAIT"} />
             <ScalpStatus label="Confiance" value={`${plan.score}/100`} active={plan.score >= 60} />
             <ScalpStatus label="Alerte" value={plan.waitReason} active={plan.decision !== "WAIT"} />
           </div>

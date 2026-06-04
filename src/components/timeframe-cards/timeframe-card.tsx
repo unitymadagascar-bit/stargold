@@ -10,8 +10,8 @@ export function TimeframeCard({
   analysis: TimeframeAnalysis;
   onSelect: () => void;
 }) {
-  const bearish = analysis.signal === "STRONG SELL" || analysis.signal === "SELL SCALP" || analysis.trend === "bearish";
-  const bullish = analysis.signal === "STRONG BUY" || analysis.signal === "BUY SCALP" || analysis.trend === "bullish";
+  const bearish = analysis.signal === "STRONG SELL" || analysis.signal === "WATCH SELL" || analysis.signal === "SELL SCALP READY" || analysis.trend === "bearish";
+  const bullish = analysis.signal === "STRONG BUY" || analysis.signal === "WATCH BUY" || analysis.signal === "BUY SCALP READY" || analysis.trend === "bullish";
   const barColor = bearish ? "bg-[#ff333d]" : bullish ? "bg-emerald-300" : "bg-amber-300";
 
   return (

@@ -4,6 +4,7 @@ import type {
   FundamentalContext,
   MacroContext,
   NewsEvent,
+  ScalpingSensitivity,
   Signal,
   SignalMode,
   TechnicalAnalysis,
@@ -22,6 +23,14 @@ import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDe
 
 const MIN_ANALYSIS_CANDLES = 30;
 const SCALPING_TIMEFRAMES: Timeframe[] = ["M1", "M5", "M15"];
+const sensitivityProfiles: Record<
+  ScalpingSensitivity,
+  { minConditions: number; minRiskReward: number; readyThreshold: number; watchThreshold: number }
+> = {
+  safe: { minConditions: 4, minRiskReward: 1.2, readyThreshold: 60, watchThreshold: 52 },
+  balanced: { minConditions: 3, minRiskReward: 1.1, readyThreshold: 58, watchThreshold: 50 },
+  aggressive: { minConditions: 3, minRiskReward: 1.0, readyThreshold: 58, watchThreshold: 48 },
+};
 
 interface DecisionResult {
   signal: Signal;
@@ -53,12 +62,14 @@ export function buildLiveTimeframeAnalyses({
   macro,
   mode = "conservative",
   news,
+  scalpingSensitivity = "balanced",
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
   macro: MacroContext;
   mode?: SignalMode;
   news: NewsEvent[];
+  scalpingSensitivity?: ScalpingSensitivity;
 }): TimeframeAnalysis[] {
   void macro;
   const higherTimeframe = getHigherTimeframeContext(candleMap);
@@ -68,7 +79,7 @@ export function buildLiveTimeframeAnalyses({
     const candles = candleMap[timeframe];
 
     if (candles.length < MIN_ANALYSIS_CANDLES) {
-      return emptyTimeframeAnalysis({ mode, newsNearby: redNewsNearby, timeframe, waitReason: "WAIT: not enough live candles" });
+      return emptyTimeframeAnalysis({ mode, newsNearby: redNewsNearby, scalpingSensitivity, timeframe, waitReason: "WAIT: not enough live candles" });
     }
 
     const baseAnalysis = analyzeCandles(candles);
@@ -90,6 +101,7 @@ export function buildLiveTimeframeAnalyses({
       news,
       redNewsNearby,
       riskReward,
+      scalpingSensitivity,
       timeframe,
     });
 
@@ -97,6 +109,7 @@ export function buildLiveTimeframeAnalyses({
       timeframe,
       signal: decision.signal,
       signalMode: mode,
+      scalpingSensitivity,
       waitReason: decision.waitReason,
       missingConditions: decision.missingConditions,
       score: decision.confidence,
@@ -125,6 +138,7 @@ export function buildLiveTradePlan({
   mode = "conservative",
   news,
   preferredTimeframe,
+  scalpingSensitivity = "balanced",
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
@@ -132,6 +146,7 @@ export function buildLiveTradePlan({
   mode?: SignalMode;
   news: NewsEvent[];
   preferredTimeframe?: Timeframe;
+  scalpingSensitivity?: ScalpingSensitivity;
 }): TradePlan {
   void macro;
   const analysisTimeframe = getPlanTimeframe(candleMap, mode, preferredTimeframe);
@@ -143,6 +158,7 @@ export function buildLiveTradePlan({
       direction: "Neutral",
       decision: "WAIT",
       signalMode: mode,
+      scalpingSensitivity,
       waitReason: "WAIT: not enough live candles",
       missingConditions: ["Live MT5 candles"],
       score: 0,
@@ -180,6 +196,7 @@ export function buildLiveTradePlan({
     news,
     redNewsNearby,
     riskReward,
+    scalpingSensitivity,
     timeframe: analysisTimeframe,
   });
 
@@ -187,6 +204,7 @@ export function buildLiveTradePlan({
     direction,
     decision: decision.signal,
     signalMode: mode,
+    scalpingSensitivity,
     waitReason: decision.waitReason,
     missingConditions: decision.missingConditions,
     score: decision.confidence,
@@ -222,6 +240,7 @@ function evaluateSignal({
   news,
   redNewsNearby,
   riskReward,
+  scalpingSensitivity,
   timeframe,
 }: {
   analysis: TechnicalAnalysis;
@@ -234,10 +253,11 @@ function evaluateSignal({
   news: NewsEvent[];
   redNewsNearby: boolean;
   riskReward: number;
+  scalpingSensitivity: ScalpingSensitivity;
   timeframe: Timeframe;
 }): DecisionResult {
   if (mode === "scalping") {
-    return evaluateScalpingSignal({ analysis, candles, direction, higherTimeframe, redNewsNearby, riskReward, timeframe });
+    return evaluateScalpingSignal({ analysis, candles, direction, higherTimeframe, redNewsNearby, riskReward, scalpingSensitivity, timeframe });
   }
 
   return evaluateConservativeSignal({ analysis, conservativeScore, direction, fundamental, news, redNewsNearby, riskReward });
@@ -295,6 +315,7 @@ function evaluateScalpingSignal({
   higherTimeframe,
   redNewsNearby,
   riskReward,
+  scalpingSensitivity,
   timeframe,
 }: {
   analysis: TechnicalAnalysis;
@@ -303,6 +324,7 @@ function evaluateScalpingSignal({
   higherTimeframe: HigherTimeframeContext;
   redNewsNearby: boolean;
   riskReward: number;
+  scalpingSensitivity: ScalpingSensitivity;
   timeframe: Timeframe;
 }): DecisionResult {
   if (!SCALPING_TIMEFRAMES.includes(timeframe)) {
@@ -315,42 +337,80 @@ function evaluateScalpingSignal({
   }
 
   const micro = evaluateMicroStructure(candles, analysis, direction);
+  const profile = sensitivityProfiles[scalpingSensitivity];
   const higherTimeframeConflict = isHigherTimeframeConflict(micro.direction, higherTimeframe);
-  const missingConditions = [
-    redNewsNearby ? "No red USD news risk" : null,
-    higherTimeframeConflict ? "Higher timeframe conflict must ease" : null,
-    micro.direction === "Neutral" ? "Clear M1/M5 micro direction" : null,
-    micro.microBos ? null : "Micro BOS/CHoCH",
-    micro.momentum ? null : "Short-term momentum",
-    micro.rejection ? null : "Quick rejection candle",
-    micro.sweep ? null : "Liquidity sweep",
-    micro.atrOk ? null : "ATR/volatility enough",
-    micro.zoneOk ? null : "Price closer to zone/retest",
-    riskReward >= 1.2 ? null : "Risk/reward above 1:1.2",
+  const setupConditions = [
+    micro.sweep ? "liquidity sweep" : null,
+    micro.obZoneNearby ? "OB zone nearby" : null,
+    micro.microBos ? "micro BOS/CHoCH" : null,
+    micro.rejection ? "rejection candle" : null,
+    micro.momentum ? "momentum" : null,
+    micro.atrOk ? "ATR acceptable" : null,
+    micro.supportResistanceNearby ? "price near support/resistance" : null,
   ].filter(Boolean) as string[];
+  const readyConfirmation = micro.microBos || micro.rejection || (micro.momentum && (micro.sweep || micro.obZoneNearby || micro.supportResistanceNearby));
+  const missingConditions = getScalpingMissingConditions({
+    higherTimeframeConflict,
+    micro,
+    minConditions: profile.minConditions,
+    minRiskReward: profile.minRiskReward,
+    readyConfirmation,
+    redNewsNearby,
+    riskReward,
+    setupConditions,
+    watchThreshold: profile.watchThreshold,
+  });
 
   if (redNewsNearby) {
     return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: news risk", missingConditions };
   }
 
+  if (analysis.volatility === "trop dangereuse") {
+    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: volatility danger zone", missingConditions: ["Volatility below danger zone"] };
+  }
+
   if (higherTimeframeConflict) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: higher timeframe conflict / counter-trend risk", missingConditions };
+    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: higher timeframe strongly opposite", missingConditions };
   }
 
-  if (micro.confidence < 60) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: getWaitReason(missingConditions), missingConditions };
+  if (micro.direction === "Neutral" || setupConditions.length < profile.minConditions || micro.confidence < profile.watchThreshold) {
+    return { signal: "WAIT", confidence: micro.confidence, waitReason: getScalpingWaitReason(missingConditions), missingConditions };
   }
 
-  if (missingConditions.length) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: getWaitReason(missingConditions), missingConditions };
+  if (micro.confidence >= 75 && readyConfirmation && riskReward >= profile.minRiskReward) {
+    return {
+      signal: micro.direction === "Bullish" ? "STRONG BUY" : "STRONG SELL",
+      confidence: micro.confidence,
+      waitReason: `${micro.direction === "Bullish" ? "STRONG BUY" : "STRONG SELL"}: scalp setup has strong confirmation`,
+      missingConditions: [],
+    };
+  }
+
+  if (micro.confidence >= profile.readyThreshold && readyConfirmation && riskReward >= profile.minRiskReward) {
+    return {
+      signal: micro.direction === "Bullish" ? "BUY SCALP READY" : "SELL SCALP READY",
+      confidence: micro.confidence,
+      waitReason: `${micro.direction === "Bullish" ? "BUY" : "SELL"} SCALP READY: wait for the next short trigger candle before entry`,
+      missingConditions: [],
+    };
   }
 
   if (micro.direction === "Bullish") {
-    return { signal: "BUY SCALP", confidence: micro.confidence, waitReason: "BUY SCALP: short-term setup active", missingConditions: [] };
+    return {
+      signal: "WATCH BUY",
+      confidence: micro.confidence,
+      waitReason: "WATCH BUY: setup forming, confirmation still needed",
+      missingConditions,
+    };
   }
 
   if (micro.direction === "Bearish") {
-    return { signal: "SELL SCALP", confidence: micro.confidence, waitReason: "SELL SCALP: short-term setup active", missingConditions: [] };
+    return {
+      signal: "WATCH SELL",
+      confidence: micro.confidence,
+      waitReason: "WATCH SELL: setup forming, confirmation still needed",
+      missingConditions,
+    };
   }
 
   return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: no momentum", missingConditions };
@@ -371,7 +431,8 @@ function evaluateMicroStructure(candles: Candle[], analysis: TechnicalAnalysis, 
       rejection: false,
       sweep: false,
       atrOk: false,
-      zoneOk: false,
+      obZoneNearby: false,
+      supportResistanceNearby: false,
     };
   }
 
@@ -396,7 +457,9 @@ function evaluateMicroStructure(candles: Candle[], analysis: TechnicalAnalysis, 
   const sweep = direction === "Bullish" ? bullishSweep : bearishSweep;
   const momentum = direction === "Bullish" ? bullishMomentum : bearishMomentum;
   const atrOk = analysis.volatility !== "calme" && analysis.volatility !== "trop dangereuse" && analysis.atr > Math.max(last.close * 0.00018, 0.35);
-  const zoneOk = isPriceNearActionZone({ analysis, price: last.close });
+  const obZoneNearby = isPriceNearOrderBlock({ analysis, price: last.close });
+  const supportResistanceNearby = isPriceNearSupportResistance({ analysis, price: last.close });
+  const zoneOk = obZoneNearby || supportResistanceNearby;
   const confidence = clamp(
     (direction !== "Neutral" ? 6 : 0) +
       (microBos ? 18 : 0) +
@@ -411,7 +474,7 @@ function evaluateMicroStructure(candles: Candle[], analysis: TechnicalAnalysis, 
     100,
   );
 
-  return { confidence, direction, microBos, momentum, rejection, sweep, atrOk, zoneOk };
+  return { atrOk, confidence, direction, microBos, momentum, obZoneNearby, rejection, supportResistanceNearby, sweep, zoneOk };
 }
 
 function withOrderBlock({
@@ -550,7 +613,60 @@ function isHigherTimeframeConflict(direction: Direction, higherTimeframe: Higher
   return (direction === "Bullish" && higherTimeframe.trend === "bearish") || (direction === "Bearish" && higherTimeframe.trend === "bullish");
 }
 
-function isPriceNearActionZone({ analysis, price }: { analysis: TechnicalAnalysis; price: number }) {
+function getScalpingMissingConditions({
+  higherTimeframeConflict,
+  micro,
+  minConditions,
+  minRiskReward,
+  readyConfirmation,
+  redNewsNearby,
+  riskReward,
+  setupConditions,
+  watchThreshold,
+}: {
+  higherTimeframeConflict: boolean;
+  micro: ReturnType<typeof evaluateMicroStructure>;
+  minConditions: number;
+  minRiskReward: number;
+  readyConfirmation: boolean;
+  redNewsNearby: boolean;
+  riskReward: number;
+  setupConditions: string[];
+  watchThreshold: number;
+}) {
+  return [
+    redNewsNearby ? "No red USD news risk" : null,
+    higherTimeframeConflict ? "Higher timeframe is strongly opposite" : null,
+    micro.direction === "Neutral" ? "Clear M1/M5 micro direction" : null,
+    setupConditions.length >= minConditions ? null : `At least ${minConditions} scalp setup conditions (${setupConditions.length}/${minConditions})`,
+    micro.confidence >= watchThreshold ? null : `Confidence >= ${watchThreshold}% for WATCH`,
+    readyConfirmation ? null : "Entry confirmation: rejection candle, micro BOS/CHoCH, or momentum from zone",
+    riskReward >= minRiskReward ? null : `Risk/reward >= 1:${minRiskReward.toFixed(1)}`,
+    micro.atrOk ? null : "ATR acceptable",
+  ].filter(Boolean) as string[];
+}
+
+function getScalpingWaitReason(missingConditions: string[]) {
+  if (missingConditions.includes("No red USD news risk")) {
+    return "WAIT: red USD news risk";
+  }
+
+  if (missingConditions.includes("Higher timeframe is strongly opposite")) {
+    return "WAIT: higher timeframe strongly opposite";
+  }
+
+  if (missingConditions.some((condition) => condition.startsWith("At least"))) {
+    return "WAIT: no scalp setup yet";
+  }
+
+  if (missingConditions.some((condition) => condition.startsWith("Confidence"))) {
+    return "WAIT: confidence too low for WATCH";
+  }
+
+  return missingConditions[0] ? `WAIT: ${missingConditions[0]}` : "WAIT: no setup";
+}
+
+function isPriceNearOrderBlock({ analysis, price }: { analysis: TechnicalAnalysis; price: number }) {
   const atrDistance = Math.max(analysis.atr * 1.2, 0.75);
 
   if (analysis.orderBlock) {
@@ -560,6 +676,12 @@ function isPriceNearActionZone({ analysis, price }: { analysis: TechnicalAnalysi
 
     return inZone || nearZone;
   }
+
+  return false;
+}
+
+function isPriceNearSupportResistance({ analysis, price }: { analysis: TechnicalAnalysis; price: number }) {
+  const atrDistance = Math.max(analysis.atr * 1.2, 0.75);
 
   return Math.abs(price - analysis.support) <= atrDistance || Math.abs(price - analysis.resistance) <= atrDistance;
 }
@@ -626,11 +748,11 @@ function getTakeProfits(direction: Direction, price: number, risk: number): [num
 
 function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>, mode: SignalMode, preferredTimeframe?: Timeframe): Timeframe {
   if (mode === "scalping") {
-    if (preferredTimeframe && SCALPING_TIMEFRAMES.includes(preferredTimeframe) && candleMap[preferredTimeframe].length >= MIN_ANALYSIS_CANDLES) {
+    if (preferredTimeframe && (preferredTimeframe === "M1" || preferredTimeframe === "M5") && candleMap[preferredTimeframe].length >= MIN_ANALYSIS_CANDLES) {
       return preferredTimeframe;
     }
 
-    return SCALPING_TIMEFRAMES.find((timeframe) => candleMap[timeframe].length >= MIN_ANALYSIS_CANDLES) ?? "M5";
+    return (["M1", "M5", "M15"] as Timeframe[]).find((timeframe) => candleMap[timeframe].length >= MIN_ANALYSIS_CANDLES) ?? "M5";
   }
 
   if (candleMap.H1.length >= MIN_ANALYSIS_CANDLES) {
@@ -646,11 +768,15 @@ function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>, mode: SignalMo
 
 function summarizeDecision(decision: Signal, direction: Direction, mode: SignalMode) {
   if (decision === "STRONG BUY" || decision === "STRONG SELL") {
-    return `Biais ${direction.toLowerCase()} fort en mode conservateur.`;
+    return `Biais ${direction.toLowerCase()} fort.`;
   }
 
-  if (decision === "BUY SCALP" || decision === "SELL SCALP") {
-    return `Setup scalp ${direction.toLowerCase()} actif en ${mode}.`;
+  if (decision === "BUY SCALP READY" || decision === "SELL SCALP READY") {
+    return `Setup scalp ${direction.toLowerCase()} pret apres confirmation courte.`;
+  }
+
+  if (decision === "WATCH BUY" || decision === "WATCH SELL") {
+    return `Setup scalp ${direction.toLowerCase()} en formation.`;
   }
 
   return mode === "scalping"
@@ -661,11 +787,13 @@ function summarizeDecision(decision: Signal, direction: Direction, mode: SignalM
 function emptyTimeframeAnalysis({
   mode,
   newsNearby,
+  scalpingSensitivity,
   timeframe,
   waitReason,
 }: {
   mode: SignalMode;
   newsNearby: boolean;
+  scalpingSensitivity: ScalpingSensitivity;
   timeframe: Timeframe;
   waitReason: string;
 }): TimeframeAnalysis {
@@ -673,6 +801,7 @@ function emptyTimeframeAnalysis({
     timeframe,
     signal: "WAIT",
     signalMode: mode,
+    scalpingSensitivity,
     waitReason,
     missingConditions: ["Live candles"],
     score: 0,

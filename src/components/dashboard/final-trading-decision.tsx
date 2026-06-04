@@ -17,6 +17,7 @@ type DirectionTone = "buy" | "sell" | "wait";
 export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamental, plan }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
   const tone = getSignalTone(final.signal);
+  const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL";
 
   return (
     <section className={`mt-3 overflow-hidden rounded-md border ${tone.border} bg-[#101318] shadow-[0_24px_70px_rgba(0,0,0,0.28)]`}>
@@ -54,13 +55,13 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
 
         <aside className="rounded-md border border-white/10 bg-black/25 p-3">
           <div className="flex items-center gap-2 text-amber-100">
-            {final.signal === "WAIT" ? <CircleAlert size={17} /> : <CircleDollarSign size={17} />}
-            <p className="text-sm font-semibold">{final.signal === "WAIT" ? "Pourquoi attendre" : "Pourquoi ce plan"}</p>
+            {confirmationPending ? <CircleAlert size={17} /> : <CircleDollarSign size={17} />}
+            <p className="text-sm font-semibold">{confirmationPending ? "Confirmation attendue" : "Pourquoi ce plan"}</p>
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-300">{final.reason}</p>
-          {final.signal === "WAIT" ? (
+          {confirmationPending ? (
             <p className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm font-semibold leading-6 text-sky-100">
-              Condition manquante: {final.missingCondition}
+              {final.signal === "WAIT" ? "Condition manquante" : "Confirmation requise"}: {final.missingCondition}
             </p>
           ) : null}
         </aside>
@@ -95,8 +96,8 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "SELL SCALP" || signal === "STRONG SELL" || plan.direction === "Bearish";
-  const bullish = signal === "BUY SCALP" || signal === "STRONG BUY" || plan.direction === "Bullish";
+  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "STRONG SELL" || plan.direction === "Bearish";
+  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "STRONG BUY" || plan.direction === "Bullish";
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
   const newsUnsafe = Boolean(fundamental.caution || activeAnalysis?.newsNearby);
@@ -142,6 +143,14 @@ function getFinalDecision({
 }
 
 function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "WATCH BUY") {
+    return "WATCH BUY";
+  }
+
+  if (signal === "WATCH SELL") {
+    return "WATCH SELL";
+  }
+
   if (signal !== "WAIT" && bullish) {
     return "BUY";
   }
@@ -154,8 +163,16 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
 }
 
 function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
-  if (signal !== "WAIT") {
-    return "Signal actif uniquement si la confirmation reste valide au moment d'entrer.";
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return "Setup en formation. Ne pas entrer encore: attendre la confirmation indiquee.";
+  }
+
+  if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
+    return "Entree possible apres une courte confirmation sur la prochaine bougie.";
+  }
+
+  if (signal === "STRONG BUY" || signal === "STRONG SELL") {
+    return "Signal fort. Verifie quand meme news, spread, SL et taille de lot avant execution.";
   }
 
   if (bullish) {
@@ -170,8 +187,16 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
 }
 
 function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
-  if (signal !== "WAIT") {
-    return "Decision active";
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return "Setup a surveiller";
+  }
+
+  if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
+    return "Scalp ready";
+  }
+
+  if (signal === "STRONG BUY" || signal === "STRONG SELL") {
+    return "Decision forte";
   }
 
   if (bullish) {
@@ -198,8 +223,16 @@ function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boo
 }
 
 function getNextConfirmation({ missingCondition, signal }: { missingCondition: string; signal: Signal }) {
-  if (signal !== "WAIT") {
-    return "Verifier une derniere fois le rejet/BOS, la news et le stop loss avant execution.";
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return missingCondition;
+  }
+
+  if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
+    return "Entry trigger: cassure/rejet sur la prochaine bougie M1/M5 dans le sens du signal.";
+  }
+
+  if (signal === "STRONG BUY" || signal === "STRONG SELL") {
+    return "Verifier une derniere fois le rejet/BOS, la news, le spread et le stop loss avant execution.";
   }
 
   return missingCondition;
@@ -210,12 +243,16 @@ function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; b
     return "Do not enter. Wait for every checklist item to turn valid.";
   }
 
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return "Watch only. No entry until the missing confirmation appears.";
+  }
+
   if (bullish) {
-    return "Buy only after a rejection candle closes above the zone or a bullish micro BOS/CHoCH confirms.";
+    return "Buy scalp after the next short trigger: rejection candle or bullish micro BOS/CHoCH.";
   }
 
   if (bearish) {
-    return "Sell only after a rejection candle closes below the zone or a bearish micro BOS/CHoCH confirms.";
+    return "Sell scalp after the next short trigger: rejection candle or bearish micro BOS/CHoCH.";
   }
 
   return "Do not enter until direction is clear.";
@@ -244,6 +281,10 @@ function getInvalidation({ orderBlock, plan, newsUnsafe, signal }: { orderBlock:
 
   if (signal === "WAIT") {
     return "Any entry is invalid until missing condition is confirmed";
+  }
+
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return "Invalid if confirmation fails or price leaves the zone before trigger";
   }
 
   const zoneText = orderBlock ? " or OB zone is broken cleanly" : "";
@@ -299,7 +340,23 @@ function translateMissingCondition(condition: string) {
     "Micro BOS/CHoCH": "Wait for a micro BOS/CHoCH.",
     "Quick rejection candle": "Wait for a rejection candle.",
     "Live MT5 candles": "Wait for live candles from MT5 or fallback market feed.",
+    "Clear M1/M5 micro direction": "Wait for M1/M5 to show a clear buy or sell micro direction.",
+    "Entry confirmation: rejection candle, micro BOS/CHoCH, or momentum from zone": "Wait for a rejection candle, micro BOS/CHoCH, or momentum from the zone.",
+    "ATR acceptable": "Wait for ATR/volatility to become tradable.",
+    "Higher timeframe is strongly opposite": "Do not scalp against a strongly opposite H1/H4 context.",
   };
+
+  if (condition.startsWith("At least")) {
+    return "Wait until at least 3 scalp setup conditions are true.";
+  }
+
+  if (condition.startsWith("Confidence")) {
+    return "Wait until confidence reaches the WATCH threshold.";
+  }
+
+  if (condition.startsWith("Risk/reward")) {
+    return "Wait for a better entry or target so risk/reward is acceptable.";
+  }
 
   return translations[condition] ?? condition;
 }
@@ -374,7 +431,7 @@ function ChecklistItem({ label, status }: { label: string; status: CheckStatus }
 }
 
 function getSignalTone(signal: Signal) {
-  if (signal === "STRONG BUY" || signal === "BUY SCALP") {
+  if (signal === "STRONG BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
     return {
       badge: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
       border: "border-emerald-300/20",
@@ -382,7 +439,7 @@ function getSignalTone(signal: Signal) {
     };
   }
 
-  if (signal === "STRONG SELL" || signal === "SELL SCALP") {
+  if (signal === "STRONG SELL" || signal === "SELL SCALP READY" || signal === "WATCH SELL") {
     return {
       badge: "border-rose-300/25 bg-rose-300/10 text-rose-100",
       border: "border-rose-300/20",

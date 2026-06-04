@@ -2,9 +2,11 @@ import type { Signal } from "@/types";
 
 const styles: Record<Signal, string> = {
   "STRONG BUY": "border-emerald-400/40 bg-emerald-400/14 text-emerald-100",
-  "BUY SCALP": "border-lime-400/35 bg-lime-400/12 text-lime-200",
+  "BUY SCALP READY": "border-lime-400/35 bg-lime-400/12 text-lime-200",
+  "WATCH BUY": "border-teal-400/35 bg-teal-400/12 text-teal-100",
   WAIT: "border-sky-400/35 bg-sky-400/12 text-sky-200",
-  "SELL SCALP": "border-orange-400/35 bg-orange-400/12 text-orange-200",
+  "WATCH SELL": "border-amber-400/35 bg-amber-400/12 text-amber-100",
+  "SELL SCALP READY": "border-orange-400/35 bg-orange-400/12 text-orange-200",
   "STRONG SELL": "border-rose-400/40 bg-rose-400/14 text-rose-100",
 };
 

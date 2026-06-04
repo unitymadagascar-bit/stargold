@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Gauge, ShieldCheck, Target, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, OrderBlockZone, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { FundamentalContext, LiquidityAnalysis, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -23,13 +23,14 @@ export function MainDashboard() {
   const fundamentals = useFundamentalContext();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
+  const [scalpingSensitivity, setScalpingSensitivity] = useState<ScalpingSensitivity>("balanced");
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents }),
-    [fundamentals.fundamental, live.candleMap, signalMode],
+    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, scalpingSensitivity }),
+    [fundamentals.fundamental, live.candleMap, scalpingSensitivity, signalMode],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, preferredTimeframe: activeTimeframe }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, signalMode],
+    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, preferredTimeframe: activeTimeframe, scalpingSensitivity }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, scalpingSensitivity, signalMode],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -39,6 +40,12 @@ export function MainDashboard() {
   const priceChange = latestCandle && previousCandle ? latestCandle.close - previousCandle.close : 0;
   const priceChangePercent = previousCandle?.close ? (priceChange / previousCandle.close) * 100 : 0;
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
+  const handleSignalModeChange = (mode: SignalMode) => {
+    setSignalMode(mode);
+    if (mode === "scalping" && activeTimeframe !== "M1" && activeTimeframe !== "M5") {
+      setActiveTimeframe("M5");
+    }
+  };
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1340px] px-3 py-3 sm:px-4 lg:px-5">
@@ -103,7 +110,7 @@ export function MainDashboard() {
         </div>
 
         <aside className="space-y-3">
-          <SignalModePanel activeAnalysis={activeAnalysis} mode={signalMode} onModeChange={setSignalMode} plan={plan} />
+          <SignalModePanel activeAnalysis={activeAnalysis} mode={signalMode} onModeChange={handleSignalModeChange} onSensitivityChange={setScalpingSensitivity} plan={plan} sensitivity={scalpingSensitivity} />
           <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
           <TradeChecklist />
           <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
@@ -140,8 +147,8 @@ function MarketSummary({
   priceChange: number;
   priceChangePercent: number;
 }) {
-  const bearish = plan.direction === "Bearish" || plan.decision === "SELL SCALP" || plan.decision === "STRONG SELL";
-  const bullish = plan.direction === "Bullish" || plan.decision === "BUY SCALP" || plan.decision === "STRONG BUY";
+  const bearish = plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG SELL";
+  const bullish = plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "STRONG BUY";
   const scoreColor = bullish ? "#22c55e" : bearish ? "#ff333d" : "#f59e0b";
 
   return (
@@ -291,14 +298,18 @@ function SignalModePanel({
   activeAnalysis,
   mode,
   onModeChange,
+  onSensitivityChange,
   plan,
+  sensitivity,
 }: {
   activeAnalysis?: TimeframeAnalysis;
   mode: SignalMode;
   onModeChange: (mode: SignalMode) => void;
+  onSensitivityChange: (sensitivity: ScalpingSensitivity) => void;
   plan: TradePlan;
+  sensitivity: ScalpingSensitivity;
 }) {
-  const scalpReady = plan.decision === "BUY SCALP" || plan.decision === "SELL SCALP";
+  const scalpActive = plan.decision === "WATCH BUY" || plan.decision === "WATCH SELL" || plan.decision === "BUY SCALP READY" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG BUY" || plan.decision === "STRONG SELL";
   const missing = activeAnalysis?.missingConditions ?? plan.missingConditions;
 
   return (
@@ -315,9 +326,18 @@ function SignalModePanel({
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <SetupMetric label="Mode actif" value={mode === "scalping" ? "Scalping" : "Conservative"} />
-        <SetupMetric label="Scalp status" value={scalpReady ? plan.decision : "WAIT"} />
-        <SetupMetric label="Seuil scalp" value="60/100" />
-        <SetupMetric label="Timeframes" value="M1 / M5 / M15" />
+        <SetupMetric label="Scalp status" value={scalpActive ? plan.decision : "WAIT"} />
+        <SetupMetric label="Seuils" value="WATCH 50 / READY 58" />
+        <SetupMetric label="Priorite" value="M1 / M5 puis M15" />
+        <SetupMetric label="Sensibilite" value={formatSensitivity(sensitivity)} />
+      </div>
+      <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Scalping sensitivity</p>
+        <div className="grid grid-cols-3 gap-1">
+          <SensitivityButton active={sensitivity === "safe"} label="Safe" onClick={() => onSensitivityChange("safe")} />
+          <SensitivityButton active={sensitivity === "balanced"} label="Balanced" onClick={() => onSensitivityChange("balanced")} />
+          <SensitivityButton active={sensitivity === "aggressive"} label="Aggressive" onClick={() => onSensitivityChange("aggressive")} />
+        </div>
       </div>
       <p className="mt-3 rounded border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
         Scalping has higher risk and requires strict stop loss.
@@ -325,11 +345,19 @@ function SignalModePanel({
       <p className="mt-2 rounded border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
         {mode === "scalping"
           ? missing.length
-            ? `Avant BUY/SELL SCALP: ${missing.join(", ")}`
-            : "Conditions scalp pretes."
-          : "Passe en Scalping pour activer les alertes BUY SCALP / SELL SCALP sur M1, M5 et M15."}
+            ? `Avant READY: ${missing.join(", ")}`
+            : "Scalp READY: attendre le trigger court indique avant execution."
+          : "Passe en Scalping pour activer WATCH / SCALP READY sur M1, M5 et M15."}
       </p>
     </section>
+  );
+}
+
+function SensitivityButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button className={`h-8 rounded px-2 text-[11px] font-semibold transition ${active ? "bg-amber-200 text-black" : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"}`} type="button" onClick={onClick}>
+      {label}
+    </button>
   );
 }
 
@@ -354,6 +382,18 @@ function SetupMetric({ label, value }: { label: string; value: string }) {
       <p className="mt-1 text-slate-200">{value}</p>
     </div>
   );
+}
+
+function formatSensitivity(sensitivity: ScalpingSensitivity) {
+  if (sensitivity === "safe") {
+    return "Safe";
+  }
+
+  if (sensitivity === "aggressive") {
+    return "Aggressive";
+  }
+
+  return "Balanced";
 }
 
 function LiquidityPanel({ liquidity }: { liquidity: LiquidityAnalysis | null | undefined }) {

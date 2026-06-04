@@ -1,8 +1,10 @@
 export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
-export type Signal = "STRONG BUY" | "BUY SCALP" | "WAIT" | "SELL SCALP" | "STRONG SELL";
+export type Signal = "STRONG BUY" | "BUY SCALP READY" | "WATCH BUY" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "STRONG SELL";
 
 export type SignalMode = "conservative" | "scalping";
+
+export type ScalpingSensitivity = "safe" | "balanced" | "aggressive";
 
 export type Direction = "Bullish" | "Bearish" | "Neutral";
 
@@ -203,6 +205,7 @@ export interface TimeframeAnalysis {
   timeframe: Timeframe;
   signal: Signal;
   signalMode: SignalMode;
+  scalpingSensitivity: ScalpingSensitivity;
   waitReason: string;
   missingConditions: string[];
   score: number;
@@ -240,6 +243,7 @@ export interface TradePlan {
   direction: Direction;
   decision: Signal;
   signalMode: SignalMode;
+  scalpingSensitivity: ScalpingSensitivity;
   waitReason: string;
   missingConditions: string[];
   score: number;

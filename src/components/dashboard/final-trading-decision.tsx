@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleAlert, CircleDollarSign, Minus, ShieldAlert, X } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Check, CircleAlert, CircleDollarSign, Minus, ShieldAlert, X } from "lucide-react";
 import type { FundamentalContext, Signal, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { SignalBadge } from "@/components/ui/signal-badge";
 
@@ -12,6 +12,7 @@ interface FinalTradingDecisionProps {
 }
 
 type CheckStatus = "yes" | "wait" | "no";
+type DirectionTone = "buy" | "sell" | "wait";
 
 export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamental, plan }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
@@ -29,6 +30,15 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
             <SignalBadge signal={final.signal} />
             <span className={`rounded-md border px-2.5 py-1 font-mono text-xs font-bold ${tone.badge}`}>{final.confidence}%</span>
           </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 border-b border-white/10 p-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
+        <DirectionBanner final={final} />
+        <div className="rounded-md border border-white/10 bg-black/25 p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Prochaine validation</p>
+          <p className="mt-2 text-base font-bold leading-6 text-white">{final.nextConfirmation}</p>
+          <p className="mt-2 text-xs leading-5 text-slate-400">Le sens indique le scenario a surveiller. L'entree reste bloquee tant que la confirmation n'est pas presente.</p>
         </div>
       </div>
 
@@ -112,6 +122,11 @@ function getFinalDecision({
 
   return {
     signal,
+    actionLabel: getActionLabel({ bearish, bullish, signal }),
+    actionSubtitle: getActionSubtitle({ bearish, bullish, signal }),
+    directionBias: getDirectionBias({ bearish, bullish, signal }),
+    directionTone: getDirectionTone({ bearish, bullish }),
+    nextConfirmation: getNextConfirmation({ missingCondition, signal }),
     confidence: Math.max(0, Math.min(100, Math.round(plan.score))),
     entryInstruction: getEntryInstruction({ bearish, bullish, signal }),
     entryZone,
@@ -124,6 +139,70 @@ function getFinalDecision({
     missingCondition,
     checklist,
   };
+}
+
+function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal !== "WAIT" && bullish) {
+    return "BUY";
+  }
+
+  if (signal !== "WAIT" && bearish) {
+    return "SELL";
+  }
+
+  return "ATTENDRE";
+}
+
+function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal !== "WAIT") {
+    return "Signal actif uniquement si la confirmation reste valide au moment d'entrer.";
+  }
+
+  if (bullish) {
+    return "Pas d'entree maintenant. Le prochain scenario a surveiller est un BUY confirme.";
+  }
+
+  if (bearish) {
+    return "Pas d'entree maintenant. Le prochain scenario a surveiller est un SELL confirme.";
+  }
+
+  return "Pas d'entree maintenant. Aucun biais exploitable n'est assez clair.";
+}
+
+function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal !== "WAIT") {
+    return "Decision active";
+  }
+
+  if (bullish) {
+    return "Biais actuel: BUY a confirmer";
+  }
+
+  if (bearish) {
+    return "Biais actuel: SELL a confirmer";
+  }
+
+  return "Biais actuel: neutre";
+}
+
+function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boolean }): DirectionTone {
+  if (bullish) {
+    return "buy";
+  }
+
+  if (bearish) {
+    return "sell";
+  }
+
+  return "wait";
+}
+
+function getNextConfirmation({ missingCondition, signal }: { missingCondition: string; signal: Signal }) {
+  if (signal !== "WAIT") {
+    return "Verifier une derniere fois le rejet/BOS, la news et le stop loss avant execution.";
+  }
+
+  return missingCondition;
 }
 
 function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
@@ -239,6 +318,42 @@ function DecisionTile({ label, tone, value, wide = false }: { label: string; ton
     <div className={`rounded-md border border-white/10 bg-black/25 p-3 ${wide ? "md:col-span-2" : ""}`}>
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
       <p className={`mt-2 text-sm font-semibold leading-5 ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function DirectionBanner({
+  final,
+}: {
+  final: {
+    actionLabel: string;
+    actionSubtitle: string;
+    directionBias: string;
+    directionTone: DirectionTone;
+  };
+}) {
+  const isBuy = final.directionTone === "buy";
+  const isSell = final.directionTone === "sell";
+  const toneClass = isBuy
+    ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+    : isSell
+      ? "border-rose-300/30 bg-rose-300/10 text-rose-100"
+      : "border-sky-300/30 bg-sky-300/10 text-sky-100";
+  const icon = isBuy ? <ArrowUpRight size={42} /> : isSell ? <ArrowDownRight size={42} /> : <CircleAlert size={38} />;
+
+  return (
+    <div className={`rounded-md border p-4 ${toneClass}`}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.18em] opacity-75">Action immediate</p>
+          <p className="mt-1 text-4xl font-black leading-none text-white">{final.actionLabel}</p>
+        </div>
+        <div className="grid size-16 place-items-center rounded-md bg-black/25 text-white">{icon}</div>
+      </div>
+      <div className="mt-4 rounded-md border border-white/10 bg-black/20 px-3 py-2">
+        <p className="text-sm font-black uppercase tracking-[0.08em] text-white">{final.directionBias}</p>
+        <p className="mt-1 text-sm leading-5 opacity-90">{final.actionSubtitle}</p>
+      </div>
     </div>
   );
 }

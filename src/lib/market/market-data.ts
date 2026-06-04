@@ -11,7 +11,7 @@ export interface MarketDataResult<T> {
 }
 
 export async function fetchMarketHistory(timeframe: Timeframe, limit: number): Promise<MarketDataResult<Candle[]>> {
-  const mt5 = getMt5History(timeframe, limit);
+  const mt5 = await getMt5History(timeframe, limit);
 
   if (mt5) {
     return {
@@ -52,7 +52,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
 }
 
 export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
-  const mt5 = getMt5Tick();
+  const mt5 = await getMt5Tick();
 
   if (mt5) {
     return {

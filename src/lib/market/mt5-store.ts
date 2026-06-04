@@ -5,6 +5,9 @@ import { timeframes } from "@/lib/market/timeframes";
 const MAX_CANDLES = 800;
 const STALE_TICK_MS = 20_000;
 const STALE_HISTORY_MS = 90_000;
+const REDIS_TICK_TTL_SECONDS = 120;
+const REDIS_HISTORY_TTL_SECONDS = 900;
+const REDIS_KEY_PREFIX = process.env.MT5_REDIS_KEY_PREFIX || "star-gold:mt5";
 
 type Mt5CandleMapPayload = Partial<Record<Timeframe, unknown>>;
 
@@ -28,7 +31,22 @@ export interface Mt5MarketResult<T> {
   updatedAt: string | null;
 }
 
-export function ingestMt5Payload(payload: unknown): Mt5MarketResult<Record<Timeframe, number>> {
+interface Mt5RedisTickPayload {
+  data: MarketTick;
+  provider: string;
+  symbol: string;
+  updatedAt: string;
+}
+
+interface Mt5RedisHistoryPayload {
+  data: Candle[];
+  provider: string;
+  symbol: string;
+  timeframe: Timeframe;
+  updatedAt: string;
+}
+
+export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResult<Record<Timeframe, number>>> {
   if (!payload || typeof payload !== "object") {
     throw new Error("Payload MT5 invalide.");
   }
@@ -37,6 +55,7 @@ export function ingestMt5Payload(payload: unknown): Mt5MarketResult<Record<Timef
   const store = getStore();
   const tick = normalizeProviderTick(source.tick ?? source);
   const candlesPayload = source.candles;
+  const changedHistories: Timeframe[] = [];
 
   if (tick) {
     store.lastTick = tick;
@@ -48,6 +67,7 @@ export function ingestMt5Payload(payload: unknown): Mt5MarketResult<Record<Timef
 
       if (candles.length) {
         store.candleMap[timeframe] = candles.slice(-MAX_CANDLES);
+        changedHistories.push(timeframe);
       }
     }
   }
@@ -55,6 +75,12 @@ export function ingestMt5Payload(payload: unknown): Mt5MarketResult<Record<Timef
   store.source = String(source.source ?? "MT5");
   store.symbol = String(source.symbol ?? source.brokerSymbol ?? "XAUUSD");
   store.updatedAt = new Date().toISOString();
+
+  try {
+    await persistStoreUpdate({ changedHistories, store, tick });
+  } catch (error) {
+    console.warn("MT5 cloud persistence failed", error);
+  }
 
   return {
     data: getCounts(store.candleMap),
@@ -65,49 +91,80 @@ export function ingestMt5Payload(payload: unknown): Mt5MarketResult<Record<Timef
   };
 }
 
-export function getMt5History(timeframe: Timeframe, limit: number): Mt5MarketResult<Candle[]> | null {
+export async function getMt5History(timeframe: Timeframe, limit: number): Promise<Mt5MarketResult<Candle[]> | null> {
   const store = getStore();
   const candles = store.candleMap[timeframe];
 
-  if (!candles.length || isStale(store.updatedAt, STALE_HISTORY_MS)) {
+  if (candles.length && !isStale(store.updatedAt, STALE_HISTORY_MS)) {
+    return {
+      data: candles.slice(-limit),
+      provider: store.source,
+      symbol: store.symbol,
+      warning: null,
+      updatedAt: store.updatedAt,
+    };
+  }
+
+  const persisted = await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe));
+
+  if (!persisted || !persisted.data.length || isStale(persisted.updatedAt, STALE_HISTORY_MS)) {
     return null;
   }
 
   return {
-    data: candles.slice(-limit),
-    provider: store.source,
-    symbol: store.symbol,
+    data: persisted.data.slice(-limit),
+    provider: persisted.provider,
+    symbol: persisted.symbol,
     warning: null,
-    updatedAt: store.updatedAt,
+    updatedAt: persisted.updatedAt,
   };
 }
 
-export function getMt5Tick(): Mt5MarketResult<MarketTick> | null {
+export async function getMt5Tick(): Promise<Mt5MarketResult<MarketTick> | null> {
   const store = getStore();
 
-  if (!store.lastTick || isStale(store.updatedAt, STALE_TICK_MS)) {
+  if (store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS)) {
+    return {
+      data: store.lastTick,
+      provider: store.source,
+      symbol: store.symbol,
+      warning: null,
+      updatedAt: store.updatedAt,
+    };
+  }
+
+  const persisted = await readRedisJson<Mt5RedisTickPayload>(redisTickKey());
+
+  if (!persisted || isStale(persisted.updatedAt, STALE_TICK_MS)) {
     return null;
   }
 
   return {
-    data: store.lastTick,
-    provider: store.source,
-    symbol: store.symbol,
+    data: persisted.data,
+    provider: persisted.provider,
+    symbol: persisted.symbol,
     warning: null,
-    updatedAt: store.updatedAt,
+    updatedAt: persisted.updatedAt,
   };
 }
 
-export function getMt5Status() {
+export async function getMt5Status() {
   const store = getStore();
+  const persistedTick = await readRedisJson<Mt5RedisTickPayload>(redisTickKey());
+  const lastTick = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.lastTick : persistedTick?.data ?? store.lastTick;
+  const updatedAt = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.updatedAt : persistedTick?.updatedAt ?? store.updatedAt;
+  const source = persistedTick?.provider ?? store.source;
+  const symbol = persistedTick?.symbol ?? store.symbol;
+  const candleCounts = await getPersistedCounts(store.candleMap);
 
   return {
-    connected: Boolean(store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS)),
-    source: store.source,
-    symbol: store.symbol,
-    updatedAt: store.updatedAt,
-    candleCounts: getCounts(store.candleMap),
-    lastTick: store.lastTick,
+    connected: Boolean(lastTick && !isStale(updatedAt, STALE_TICK_MS)),
+    persistence: isRedisConfigured() ? "redis" : "memory",
+    source,
+    symbol,
+    updatedAt,
+    candleCounts,
+    lastTick,
   };
 }
 
@@ -149,4 +206,119 @@ function isStale(updatedAt: string | null, maxAgeMs: number) {
   }
 
   return Date.now() - Date.parse(updatedAt) > maxAgeMs;
+}
+
+async function persistStoreUpdate({ changedHistories, store, tick }: { changedHistories: Timeframe[]; store: Mt5BridgeStore; tick: MarketTick | null }) {
+  if (!isRedisConfigured() || !store.updatedAt) {
+    return;
+  }
+
+  const writes: Array<Promise<void>> = [];
+
+  if (tick) {
+    writes.push(
+      writeRedisJson(
+        redisTickKey(),
+        {
+          data: tick,
+          provider: store.source,
+          symbol: store.symbol,
+          updatedAt: store.updatedAt,
+        } satisfies Mt5RedisTickPayload,
+        REDIS_TICK_TTL_SECONDS,
+      ),
+    );
+  }
+
+  for (const timeframe of changedHistories) {
+    writes.push(
+      writeRedisJson(
+        redisHistoryKey(timeframe),
+        {
+          data: store.candleMap[timeframe],
+          provider: store.source,
+          symbol: store.symbol,
+          timeframe,
+          updatedAt: store.updatedAt,
+        } satisfies Mt5RedisHistoryPayload,
+        REDIS_HISTORY_TTL_SECONDS,
+      ),
+    );
+  }
+
+  await Promise.all(writes);
+}
+
+async function getPersistedCounts(candleMap: Record<Timeframe, Candle[]>) {
+  if (!isRedisConfigured()) {
+    return getCounts(candleMap);
+  }
+
+  const entries = await Promise.all(
+    timeframes.map(async (timeframe) => {
+      const persisted = await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe));
+      return [timeframe, persisted?.data.length ?? candleMap[timeframe].length] as const;
+    }),
+  );
+
+  return entries.reduce(
+    (accumulator, [timeframe, count]) => ({
+      ...accumulator,
+      [timeframe]: count,
+    }),
+    {} as Record<Timeframe, number>,
+  );
+}
+
+function redisTickKey() {
+  return `${REDIS_KEY_PREFIX}:tick`;
+}
+
+function redisHistoryKey(timeframe: Timeframe) {
+  return `${REDIS_KEY_PREFIX}:history:${timeframe}`;
+}
+
+function isRedisConfigured() {
+  return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+}
+
+async function writeRedisJson(key: string, value: unknown, ttlSeconds: number) {
+  await redisCommand(["SET", key, JSON.stringify(value), "EX", String(ttlSeconds)]);
+}
+
+async function readRedisJson<T>(key: string): Promise<T | null> {
+  if (!isRedisConfigured()) {
+    return null;
+  }
+
+  const result = await redisCommand(["GET", key]);
+
+  if (typeof result !== "string") {
+    return null;
+  }
+
+  try {
+    return JSON.parse(result) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function redisCommand(command: string[]) {
+  const response = await fetch(process.env.UPSTASH_REDIS_REST_URL!, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(command),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Redis MT5 store unavailable (${response.status}).`);
+  }
+
+  const payload = await response.json();
+  return payload?.result;
 }

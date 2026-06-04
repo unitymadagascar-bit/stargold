@@ -38,6 +38,17 @@ Mais ce n'est plus obligatoire pour utiliser l'application Vercel.
 
 L'application doit afficher `Flux reel MT5 actif` quand MT5 pousse ses donnees. Si MT5 demarre plus lentement, Vercel affiche un flux marche externe en attendant le premier snapshot MT5.
 
+## Important pour Vercel
+
+Pour eviter que le statut MT5 disparaisse quand Vercel change d'instance serverless, Star Gold By TSR utilise un stockage Redis Upstash si ces variables sont configurees dans Vercel :
+
+```text
+UPSTASH_REDIS_REST_URL
+UPSTASH_REDIS_REST_TOKEN
+```
+
+Sans ces variables, le bridge peut repondre temporairement, mais le statut peut redevenir `MT5 non connecte` parce que Vercel ne partage pas la memoire entre toutes les fonctions.
+
 Si l'application affiche encore `MT5 non connecte`, verifie :
 
 - l'URL WebRequest `https://tradetsr.vercel.app` autorisee dans MT5 ;

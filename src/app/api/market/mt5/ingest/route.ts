@@ -10,7 +10,7 @@ export function OPTIONS() {
 }
 
 export async function GET() {
-  return NextResponse.json(getMt5Status(), { headers: bridgeCorsHeaders });
+  return NextResponse.json(await getMt5Status(), { headers: bridgeCorsHeaders });
 }
 
 export async function POST(request: Request) {
@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = ingestMt5Payload(await request.json());
+    const result = await ingestMt5Payload(await request.json());
 
     return NextResponse.json(
       {

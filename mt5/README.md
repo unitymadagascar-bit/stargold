@@ -10,18 +10,19 @@ MT5 TradeTSRBridge -> Vercel ingest API -> Supabase relay -> Vercel app
 
 1. Dans MT5, ouvre `File > Open Data Folder`.
 2. Copie `TradeTSRBridge.mq5` dans `MQL5/Experts/`.
-3. Redemarre MT5 ou clique droit dans `Navigator > Expert Advisors > Refresh`.
-4. Va dans `Tools > Options > Expert Advisors`.
-5. Active `Allow WebRequest for listed URL`.
-6. Ajoute ces URLs :
+3. Ouvre-le dans MetaEditor et compile-le, ou redemarre MT5 pour reconstruire le `.ex5`.
+4. Clique droit dans `Navigator > Expert Advisors > Refresh`.
+5. Va dans `Tools > Options > Expert Advisors`.
+6. Active `Allow WebRequest for listed URL`.
+7. Ajoute cette URL :
 
 ```text
 https://tradetsr.vercel.app
 ```
 
-7. Attache `TradeTSRBridge` au graphique `XAUUSD`.
-8. Active `Algo Trading`.
-9. Ouvre l'application :
+8. Attache `TradeTSRBridge` au graphique `XAUUSD`.
+9. Active `Algo Trading`.
+10. Ouvre l'application :
 
 ```text
 https://tradetsr.vercel.app
@@ -40,6 +41,12 @@ Mais la production ne depend plus de localhost.
 ## Resultat attendu
 
 L'application doit afficher `MT5 connecte` quand MT5 pousse ses donnees. Si MT5 demarre plus lentement, Vercel affiche un flux externe clairement marque `Fallback, not live MT5` en attendant le premier tick MT5.
+
+La version 1.12 du bridge fait un ping au demarrage et tente un fallback GET pour les ticks si le POST JSON echoue. Dans MT5, regarde l'onglet `Experts` :
+
+- `Star Gold By TSR bridge ping OK` signifie que MT5 atteint Vercel ;
+- `WebRequest failed` signifie que l'URL n'est pas autorisee ou que MT5 bloque l'appel ;
+- `HTTP error` signifie que Vercel a repondu avec une erreur lisible.
 
 ## Important pour Vercel
 

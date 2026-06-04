@@ -7,7 +7,7 @@
 // https://tradetsr.vercel.app
 
 #property strict
-#property version "1.11"
+#property version "1.12"
 
 input string InpEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
 input bool InpUseCloudFallback = true;
@@ -19,6 +19,7 @@ input int InpPushIntervalSeconds = 1;
 int OnInit()
 {
    EventSetTimer(MathMax(1, InpPushIntervalSeconds));
+   PingEndpoint(InpEndpoint);
    return INIT_SUCCEEDED;
 }
 
@@ -120,11 +121,17 @@ void PostJson(const string body)
 {
    int status = PostJsonToEndpoint(InpEndpoint, body);
 
-   if(status == -1 && InpUseCloudFallback && InpCloudFallbackEndpoint != "" && InpCloudFallbackEndpoint != InpEndpoint)
+   if(status < 200 || status >= 300)
+      SendTickByGetFallback(InpEndpoint);
+
+   if((status == -1 || status < 200 || status >= 300) && InpUseCloudFallback && InpCloudFallbackEndpoint != "" && InpCloudFallbackEndpoint != InpEndpoint)
    {
       int fallbackStatus = PostJsonToEndpoint(InpCloudFallbackEndpoint, body);
-      if(fallbackStatus == -1)
+      if(fallbackStatus < 200 || fallbackStatus >= 300)
+      {
+         SendTickByGetFallback(InpCloudFallbackEndpoint);
          Print("Star Gold By TSR cloud fallback failed too. Add this URL in MT5 WebRequest settings: ", InpCloudFallbackEndpoint);
+      }
    }
 }
 
@@ -151,9 +158,71 @@ int PostJsonToEndpoint(const string endpoint, const string body)
    return status;
 }
 
+void PingEndpoint(const string endpoint)
+{
+   char data[];
+   char result[];
+   string resultHeaders = "";
+   string url = endpoint;
+   if(InpBridgeToken != "")
+      url += "?token=" + UrlEncode(InpBridgeToken);
+
+   int status = WebRequest("GET", url, "", 5000, data, result, resultHeaders);
+   if(status >= 200 && status < 300)
+      Print("Star Gold By TSR bridge ping OK: ", endpoint);
+   else
+      Print("Star Gold By TSR bridge ping failed. HTTP: ", status, " Error: ", GetLastError(), ". Endpoint: ", endpoint, ". Response: ", CharArrayToString(result));
+}
+
+void SendTickByGetFallback(const string endpoint)
+{
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol, tick))
+      return;
+
+   string separator = StringFind(endpoint, "?") >= 0 ? "&" : "?";
+   string url = endpoint + separator;
+   url += "tick=1";
+   url += "&source=MT5";
+   url += "&symbol=" + UrlEncode(_Symbol);
+   url += "&time=" + IntegerToString((long)tick.time_msc);
+   url += "&bid=" + DoubleToString(tick.bid, _Digits);
+   url += "&ask=" + DoubleToString(tick.ask, _Digits);
+   url += "&price=" + DoubleToString(tick.bid, _Digits);
+   url += "&volume=" + DoubleToString((double)tick.volume, 0);
+
+   if(InpBridgeToken != "")
+      url += "&token=" + UrlEncode(InpBridgeToken);
+
+   char data[];
+   char result[];
+   string resultHeaders = "";
+   int status = WebRequest("GET", url, "", 5000, data, result, resultHeaders);
+
+   if(status >= 200 && status < 300)
+      Print("Star Gold By TSR GET tick fallback OK.");
+   else
+      Print("Star Gold By TSR GET tick fallback failed. HTTP: ", status, " Error: ", GetLastError(), ". Response: ", CharArrayToString(result));
+}
+
 string JsonEscape(string value)
 {
    StringReplace(value, "\\", "\\\\");
    StringReplace(value, "\"", "\\\"");
    return value;
+}
+
+string UrlEncode(string value)
+{
+   string encoded = "";
+   for(int i = 0; i < StringLen(value); i++)
+   {
+      ushort character = StringGetCharacter(value, i);
+      if((character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.' || character == '~')
+         encoded += ShortToString(character);
+      else
+         encoded += "%" + StringFormat("%02X", character);
+   }
+
+   return encoded;
 }

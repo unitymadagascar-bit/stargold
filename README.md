@@ -62,26 +62,29 @@ npm exec --yes --package pg -- node scripts/setup-supabase-relay.mjs
 ## MT5 setup
 
 1. Copy `mt5/TradeTSRBridge.mq5` into `MQL5/Experts/`.
-2. Restart MT5 or refresh `Navigator > Expert Advisors`.
-3. Open `Tools > Options > Expert Advisors`.
-4. Enable `Allow WebRequest for listed URL`.
-5. Add:
+2. Open it in MetaEditor and compile it, or restart MT5 so the new `.ex5` is rebuilt.
+3. Refresh `Navigator > Expert Advisors`.
+4. Open `Tools > Options > Expert Advisors`.
+5. Enable `Allow WebRequest for listed URL`.
+6. Add:
 
 ```text
 https://tradetsr.vercel.app
 ```
 
-6. Attach `TradeTSRBridge` to the XAUUSD chart.
-7. Keep `InpEndpoint` as:
+7. Attach `TradeTSRBridge` to the XAUUSD chart.
+8. Keep `InpEndpoint` as:
 
 ```text
 https://tradetsr.vercel.app/api/market/mt5/ingest
 ```
 
-8. Enable `Algo Trading`.
-9. Save your MT5 profile with this chart and EA attached.
+9. Enable `Algo Trading`.
+10. Save your MT5 profile with this chart and EA attached.
 
 After a PC restart, open MT5 with Algo Trading active. The EA posts ticks every second and the app marks MT5 disconnected if no tick arrives for more than 10 seconds.
+
+TradeTSRBridge v1.12 also performs a startup ping and has a GET tick fallback if MT5 has trouble sending JSON POST requests. Check the MT5 `Experts` tab for `Star Gold By TSR bridge ping OK` or detailed HTTP/WebRequest errors.
 
 ## Status and fallback rules
 

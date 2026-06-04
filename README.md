@@ -44,12 +44,20 @@ Then add these variables in Vercel Production:
 ```text
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
+POSTGRES_URL
 SUPABASE_MT5_TICK_TABLE=mt5_ticks
 SUPABASE_MT5_HISTORY_TABLE=mt5_candles
 SUPABASE_MT5_TICK_ID=xauusd
 ```
 
 Use the Supabase service role key only on the server/Vercel side. Do not expose it as a `NEXT_PUBLIC_` variable.
+
+If the project was provisioned from Vercel Marketplace, pull the generated environment variables locally and create the relay tables:
+
+```bash
+vercel env pull .env.local
+npm exec --yes --package pg -- node scripts/setup-supabase-relay.mjs
+```
 
 ## MT5 setup
 

@@ -48,6 +48,7 @@ Pour eviter que le statut MT5 disparaisse quand Vercel change d'instance serverl
 ```text
 SUPABASE_URL
 SUPABASE_SERVICE_ROLE_KEY
+POSTGRES_URL
 SUPABASE_MT5_TICK_TABLE=mt5_ticks
 SUPABASE_MT5_HISTORY_TABLE=mt5_candles
 SUPABASE_MT5_TICK_ID=xauusd

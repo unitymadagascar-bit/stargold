@@ -341,6 +341,10 @@ function evaluateScalpingSignal({
     return { signal: "WAIT", confidence: micro.confidence, waitReason: getWaitReason(missingConditions), missingConditions };
   }
 
+  if (missingConditions.length) {
+    return { signal: "WAIT", confidence: micro.confidence, waitReason: getWaitReason(missingConditions), missingConditions };
+  }
+
   if (micro.direction === "Bullish") {
     return { signal: "BUY SCALP", confidence: micro.confidence, waitReason: "BUY SCALP: short-term setup active", missingConditions: [] };
   }
@@ -531,13 +535,7 @@ function isStrongTouchedOrderBlock(analysis: TechnicalAnalysis, direction: Direc
 function hasOrderBlockPriceActionConfirmation(analysis: TechnicalAnalysis, direction: Direction) {
   const structureConfirmed = (direction === "Bullish" && analysis.structure === "BOS") || (direction === "Bearish" && analysis.structure === "CHoCH");
 
-  return Boolean(
-    analysis.retestConfirmed ||
-      structureConfirmed ||
-      analysis.liquiditySweep ||
-      analysis.fvg ||
-      (analysis.displacement && analysis.ema20 !== analysis.ema50),
-  );
+  return Boolean(structureConfirmed || analysis.liquidity.rejectionConfirmed);
 }
 
 function directionMatchesOrderBlock(direction: Direction, orderBlockDirection: NonNullable<TechnicalAnalysis["orderBlock"]>["direction"]) {

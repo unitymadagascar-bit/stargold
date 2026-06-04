@@ -6,6 +6,7 @@ import { Activity, Gauge, ShieldCheck, Target, Zap } from "lucide-react";
 import type { FundamentalContext, LiquidityAnalysis, OrderBlockZone, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
+import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
 import { RiskPanel } from "@/components/risk-management/risk-panel";
 import { ScoreDetail } from "@/components/dashboard/score-detail";
 import { ScoreBar } from "@/components/ui/score-bar";
@@ -52,6 +53,8 @@ export function MainDashboard() {
         />
         <MacroPanel fundamental={fundamentals.fundamental} liveMessage={live.message} plan={plan} spread={spread} />
       </section>
+
+      <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} fundamental={fundamentals.fundamental} plan={plan} />
 
       <section className="mt-3">
         <TimeframeGrid activeTimeframe={activeTimeframe} analyses={timeframeAnalyses} onTimeframeChange={setActiveTimeframe} />

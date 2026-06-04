@@ -1,0 +1,291 @@
+"use client";
+
+import { Check, CircleAlert, CircleDollarSign, Minus, ShieldAlert, X } from "lucide-react";
+import type { FundamentalContext, Signal, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import { SignalBadge } from "@/components/ui/signal-badge";
+
+interface FinalTradingDecisionProps {
+  activeAnalysis?: TimeframeAnalysis;
+  activeTimeframe: Timeframe;
+  fundamental: FundamentalContext;
+  plan: TradePlan;
+}
+
+type CheckStatus = "yes" | "wait" | "no";
+
+export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamental, plan }: FinalTradingDecisionProps) {
+  const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
+  const tone = getSignalTone(final.signal);
+
+  return (
+    <section className={`mt-3 overflow-hidden rounded-md border ${tone.border} bg-[#101318] shadow-[0_24px_70px_rgba(0,0,0,0.28)]`}>
+      <div className={`border-b ${tone.border} ${tone.header} px-4 py-3`}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Final Trading Decision</p>
+            <h2 className="mt-1 text-xl font-black text-white">Plan simple avant execution</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            <SignalBadge signal={final.signal} />
+            <span className={`rounded-md border px-2.5 py-1 font-mono text-xs font-bold ${tone.badge}`}>{final.confidence}%</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <DecisionTile label="Entry instruction" value={final.entryInstruction} wide />
+          <DecisionTile label="Entry zone" value={final.entryZone} />
+          <DecisionTile label="Stop loss" value={final.stopLoss} />
+          <DecisionTile label="TP1 / TP2" value={final.takeProfits} />
+          <DecisionTile label="Invalidation" value={final.invalidation} wide />
+          <DecisionTile label="Risk level" value={final.riskLevel} tone={final.riskTone} />
+        </div>
+
+        <aside className="rounded-md border border-white/10 bg-black/25 p-3">
+          <div className="flex items-center gap-2 text-amber-100">
+            {final.signal === "WAIT" ? <CircleAlert size={17} /> : <CircleDollarSign size={17} />}
+            <p className="text-sm font-semibold">{final.signal === "WAIT" ? "Pourquoi attendre" : "Pourquoi ce plan"}</p>
+          </div>
+          <p className="mt-3 text-sm leading-6 text-slate-300">{final.reason}</p>
+          {final.signal === "WAIT" ? (
+            <p className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm font-semibold leading-6 text-sky-100">
+              Condition manquante: {final.missingCondition}
+            </p>
+          ) : null}
+        </aside>
+      </div>
+
+      <div className="grid gap-3 border-t border-white/10 p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          {final.checklist.map((item) => (
+            <ChecklistItem key={item.label} label={item.label} status={item.status} />
+          ))}
+        </div>
+        <div className="flex gap-3 rounded-md border border-amber-300/20 bg-amber-300/10 p-3">
+          <ShieldAlert className="mt-0.5 shrink-0 text-amber-200" size={18} />
+          <p className="text-xs leading-5 text-amber-100">
+            Ceci est une aide a la decision, pas un conseil financier. Ne prends aucun trade sans confirmation live, stop loss place, risque limite, et absence de news USD rouge.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function getFinalDecision({
+  activeAnalysis,
+  activeTimeframe,
+  fundamental,
+  plan,
+}: {
+  activeAnalysis?: TimeframeAnalysis;
+  activeTimeframe: Timeframe;
+  fundamental: FundamentalContext;
+  plan: TradePlan;
+}) {
+  const signal = plan.decision;
+  const bearish = signal === "SELL SCALP" || signal === "STRONG SELL" || plan.direction === "Bearish";
+  const bullish = signal === "BUY SCALP" || signal === "STRONG BUY" || plan.direction === "Bullish";
+  const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
+  const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
+  const newsUnsafe = Boolean(fundamental.caution || activeAnalysis?.newsNearby);
+  const trendAligned = Boolean(
+    (bullish && activeAnalysis?.trend === "bullish") ||
+      (bearish && activeAnalysis?.trend === "bearish") ||
+      (signal === "WAIT" && activeAnalysis?.trend && activeAnalysis.trend !== "range"),
+  );
+  const orderBlockValid = Boolean(orderBlock && orderBlock.score >= 60 && orderBlock.strength !== "ignored");
+  const liquidityConfirmed = Boolean(liquidity && (liquidity.rejectionConfirmed || liquidity.realBreakoutContinuation || (liquidity.sweepDetected && activeAnalysis?.liquiditySweep)));
+  const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
+  const checklist = [
+    { label: "Trend aligned", status: statusFromBoolean(trendAligned) },
+    { label: "OB valid", status: statusFromBoolean(orderBlockValid) },
+    { label: "Liquidity confirmed", status: statusFromBoolean(liquidityConfirmed) },
+    { label: "Rejection confirmed", status: statusFromBoolean(rejectionConfirmed) },
+    { label: "News safe", status: newsUnsafe ? "no" : "yes" },
+  ] satisfies Array<{ label: string; status: CheckStatus }>;
+  const firstFailedCheck = checklist.find((item) => item.status !== "yes");
+  const missingCondition = translateMissingCondition(plan.missingConditions[0] ?? firstFailedCheck?.label ?? plan.waitReason);
+  const entryZone = getEntryZone({ activeAnalysis, orderBlock, plan });
+  const riskLevel = getRiskLevel({ fundamental, liquidity, newsUnsafe, plan });
+
+  return {
+    signal,
+    confidence: Math.max(0, Math.min(100, Math.round(plan.score))),
+    entryInstruction: getEntryInstruction({ bearish, bullish, signal }),
+    entryZone,
+    stopLoss: formatPrice(plan.stopLoss),
+    takeProfits: `${formatPrice(plan.takeProfits[0])} / ${formatPrice(plan.takeProfits[1])}`,
+    invalidation: getInvalidation({ orderBlock, plan, newsUnsafe, signal }),
+    riskLevel: riskLevel.label,
+    riskTone: riskLevel.tone,
+    reason: getReason({ activeTimeframe, fundamental, orderBlockValid, plan, rejectionConfirmed, signal }),
+    missingCondition,
+    checklist,
+  };
+}
+
+function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "WAIT") {
+    return "Do not enter. Wait for every checklist item to turn valid.";
+  }
+
+  if (bullish) {
+    return "Buy only after a rejection candle closes above the zone or a bullish micro BOS/CHoCH confirms.";
+  }
+
+  if (bearish) {
+    return "Sell only after a rejection candle closes below the zone or a bearish micro BOS/CHoCH confirms.";
+  }
+
+  return "Do not enter until direction is clear.";
+}
+
+function getEntryZone({ activeAnalysis, orderBlock, plan }: { activeAnalysis?: TimeframeAnalysis; orderBlock: NonNullable<TradePlan["orderBlock"]> | null; plan: TradePlan }) {
+  if (orderBlock) {
+    return `${formatPrice(orderBlock.low)} - ${formatPrice(orderBlock.high)}`;
+  }
+
+  if (plan.entry) {
+    return `Around ${formatPrice(plan.entry)}`;
+  }
+
+  if (activeAnalysis?.support && activeAnalysis.resistance) {
+    return `${formatPrice(activeAnalysis.support)} - ${formatPrice(activeAnalysis.resistance)}`;
+  }
+
+  return "No valid zone yet";
+}
+
+function getInvalidation({ orderBlock, plan, newsUnsafe, signal }: { orderBlock: NonNullable<TradePlan["orderBlock"]> | null; plan: TradePlan; newsUnsafe: boolean; signal: Signal }) {
+  if (newsUnsafe) {
+    return "Blocked: red USD news risk";
+  }
+
+  if (signal === "WAIT") {
+    return "Any entry is invalid until missing condition is confirmed";
+  }
+
+  const zoneText = orderBlock ? " or OB zone is broken cleanly" : "";
+  return `Close beyond SL ${formatPrice(plan.stopLoss)}${zoneText}`;
+}
+
+function getRiskLevel({ fundamental, liquidity, newsUnsafe, plan }: { fundamental: FundamentalContext; liquidity: TradePlan["liquidity"]; newsUnsafe: boolean; plan: TradePlan }) {
+  if (newsUnsafe || fundamental.riskLevel === "eleve" || liquidity?.riskLevel === "eleve") {
+    return { label: "High", tone: "danger" as const };
+  }
+
+  if (plan.score < 60 || fundamental.riskLevel === "modere" || liquidity?.riskLevel === "modere") {
+    return { label: "Moderate", tone: "warn" as const };
+  }
+
+  return { label: "Controlled", tone: "good" as const };
+}
+
+function getReason({
+  activeTimeframe,
+  fundamental,
+  orderBlockValid,
+  plan,
+  rejectionConfirmed,
+  signal,
+}: {
+  activeTimeframe: Timeframe;
+  fundamental: FundamentalContext;
+  orderBlockValid: boolean;
+  plan: TradePlan;
+  rejectionConfirmed: boolean;
+  signal: Signal;
+}) {
+  if (signal === "WAIT") {
+    return `${plan.waitReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
+  }
+
+  const confirmation = rejectionConfirmed ? "price-action confirmation is present" : "confirmation must remain visible before execution";
+  const ob = orderBlockValid ? "a valid Order Block is mapped" : "the Order Block is not the only reason for entry";
+  const news = fundamental.caution ? "USD news risk is active, so trade should be blocked" : "USD news filter is safe";
+  return `${signal} on ${activeTimeframe}: ${ob}, ${confirmation}, and ${news}.`;
+}
+
+function translateMissingCondition(condition: string) {
+  const translations: Record<string, string> = {
+    "No red USD news risk": "Wait until red USD news risk is gone.",
+    "Liquidity confirmation after sweep": "Wait for rejection after liquidity is taken.",
+    "Confidence >= 75": "Wait for confidence to reach 75%.",
+    "Risk/reward above 1:1.2": "Wait for a better entry or wider target so RR is at least 1:1.2.",
+    "Strong Order Block": "Wait for a strong Order Block.",
+    "OB retest/touch": "Wait for price to retest the entry zone.",
+    "Price action confirmation": "Wait for rejection candle or BOS/CHoCH.",
+    "Micro BOS/CHoCH": "Wait for a micro BOS/CHoCH.",
+    "Quick rejection candle": "Wait for a rejection candle.",
+    "Live MT5 candles": "Wait for live candles from MT5 or fallback market feed.",
+  };
+
+  return translations[condition] ?? condition;
+}
+
+function DecisionTile({ label, tone, value, wide = false }: { label: string; tone?: "danger" | "good" | "warn"; value: string; wide?: boolean }) {
+  const toneClass =
+    tone === "danger"
+      ? "text-rose-100"
+      : tone === "good"
+        ? "text-emerald-100"
+        : tone === "warn"
+          ? "text-amber-100"
+          : "text-white";
+
+  return (
+    <div className={`rounded-md border border-white/10 bg-black/25 p-3 ${wide ? "md:col-span-2" : ""}`}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</p>
+      <p className={`mt-2 text-sm font-semibold leading-5 ${toneClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function ChecklistItem({ label, status }: { label: string; status: CheckStatus }) {
+  return (
+    <div className="flex min-h-12 items-center gap-2 rounded-md border border-white/10 bg-black/25 px-3 py-2 text-sm text-slate-300">
+      <span
+        className={`grid size-7 shrink-0 place-items-center rounded-md ${
+          status === "yes" ? "bg-emerald-300/15 text-emerald-200" : status === "no" ? "bg-rose-300/15 text-rose-200" : "bg-sky-300/15 text-sky-200"
+        }`}
+      >
+        {status === "yes" ? <Check size={15} /> : status === "no" ? <X size={15} /> : <Minus size={15} />}
+      </span>
+      <span className="font-medium">{label}</span>
+    </div>
+  );
+}
+
+function getSignalTone(signal: Signal) {
+  if (signal === "STRONG BUY" || signal === "BUY SCALP") {
+    return {
+      badge: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
+      border: "border-emerald-300/20",
+      header: "bg-emerald-300/10",
+    };
+  }
+
+  if (signal === "STRONG SELL" || signal === "SELL SCALP") {
+    return {
+      badge: "border-rose-300/25 bg-rose-300/10 text-rose-100",
+      border: "border-rose-300/20",
+      header: "bg-rose-300/10",
+    };
+  }
+
+  return {
+    badge: "border-sky-300/25 bg-sky-300/10 text-sky-100",
+    border: "border-sky-300/20",
+    header: "bg-sky-300/10",
+  };
+}
+
+function statusFromBoolean(value: boolean): CheckStatus {
+  return value ? "yes" : "wait";
+}
+
+function formatPrice(value?: number) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value.toFixed(2) : "--";
+}

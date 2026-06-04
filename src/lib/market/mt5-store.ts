@@ -3,11 +3,14 @@ import { normalizeHistoryCandles, normalizeProviderTick } from "@/lib/market/can
 import { timeframes } from "@/lib/market/timeframes";
 
 const MAX_CANDLES = 800;
-const STALE_TICK_MS = 20_000;
+const STALE_TICK_MS = 10_000;
 const STALE_HISTORY_MS = 90_000;
 const REDIS_TICK_TTL_SECONDS = 120;
 const REDIS_HISTORY_TTL_SECONDS = 900;
 const REDIS_KEY_PREFIX = process.env.MT5_REDIS_KEY_PREFIX || "star-gold:mt5";
+const SUPABASE_TICK_ID = process.env.SUPABASE_MT5_TICK_ID || "xauusd";
+const SUPABASE_TICK_TABLE = process.env.SUPABASE_MT5_TICK_TABLE || "mt5_ticks";
+const SUPABASE_HISTORY_TABLE = process.env.SUPABASE_MT5_HISTORY_TABLE || "mt5_candles";
 
 type Mt5CandleMapPayload = Partial<Record<Timeframe, unknown>>;
 
@@ -105,18 +108,18 @@ export async function getMt5History(timeframe: Timeframe, limit: number): Promis
     };
   }
 
-  const persisted = await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe));
+  const persistedHistory = (await readSupabaseHistory(timeframe)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe)));
 
-  if (!persisted || !persisted.data.length || isStale(persisted.updatedAt, STALE_HISTORY_MS)) {
+  if (!persistedHistory || !persistedHistory.data.length || isStale(persistedHistory.updatedAt, STALE_HISTORY_MS)) {
     return null;
   }
 
   return {
-    data: persisted.data.slice(-limit),
-    provider: persisted.provider,
-    symbol: persisted.symbol,
+    data: persistedHistory.data.slice(-limit),
+    provider: persistedHistory.provider,
+    symbol: persistedHistory.symbol,
     warning: null,
-    updatedAt: persisted.updatedAt,
+    updatedAt: persistedHistory.updatedAt,
   };
 }
 
@@ -133,33 +136,33 @@ export async function getMt5Tick(): Promise<Mt5MarketResult<MarketTick> | null> 
     };
   }
 
-  const persisted = await readRedisJson<Mt5RedisTickPayload>(redisTickKey());
+  const persistedTick = (await readSupabaseTick()) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey()));
 
-  if (!persisted || isStale(persisted.updatedAt, STALE_TICK_MS)) {
+  if (!persistedTick || isStale(persistedTick.updatedAt, STALE_TICK_MS)) {
     return null;
   }
 
   return {
-    data: persisted.data,
-    provider: persisted.provider,
-    symbol: persisted.symbol,
+    data: persistedTick.data,
+    provider: persistedTick.provider,
+    symbol: persistedTick.symbol,
     warning: null,
-    updatedAt: persisted.updatedAt,
+    updatedAt: persistedTick.updatedAt,
   };
 }
 
 export async function getMt5Status() {
   const store = getStore();
-  const persistedTick = await readRedisJson<Mt5RedisTickPayload>(redisTickKey());
-  const lastTick = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.lastTick : persistedTick?.data ?? store.lastTick;
-  const updatedAt = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.updatedAt : persistedTick?.updatedAt ?? store.updatedAt;
+  const persistedTick = (await readSupabaseTick()) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey()));
+  const lastTick = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.lastTick : (persistedTick?.data ?? store.lastTick);
+  const updatedAt = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.updatedAt : (persistedTick?.updatedAt ?? store.updatedAt);
   const source = persistedTick?.provider ?? store.source;
   const symbol = persistedTick?.symbol ?? store.symbol;
   const candleCounts = await getPersistedCounts(store.candleMap);
 
   return {
     connected: Boolean(lastTick && !isStale(updatedAt, STALE_TICK_MS)),
-    persistence: isRedisConfigured() ? "redis" : "memory",
+    persistence: getPersistenceMode(),
     source,
     symbol,
     updatedAt,
@@ -209,13 +212,14 @@ function isStale(updatedAt: string | null, maxAgeMs: number) {
 }
 
 async function persistStoreUpdate({ changedHistories, store, tick }: { changedHistories: Timeframe[]; store: Mt5BridgeStore; tick: MarketTick | null }) {
-  if (!isRedisConfigured() || !store.updatedAt) {
+  if (!store.updatedAt) {
     return;
   }
 
   const writes: Array<Promise<void>> = [];
 
   if (tick) {
+    writes.push(writeSupabaseTick({ data: tick, provider: store.source, symbol: store.symbol, updatedAt: store.updatedAt }));
     writes.push(
       writeRedisJson(
         redisTickKey(),
@@ -231,16 +235,19 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
   }
 
   for (const timeframe of changedHistories) {
+    const historyPayload = {
+      data: store.candleMap[timeframe],
+      provider: store.source,
+      symbol: store.symbol,
+      timeframe,
+      updatedAt: store.updatedAt,
+    } satisfies Mt5RedisHistoryPayload;
+
+    writes.push(writeSupabaseHistory(historyPayload));
     writes.push(
       writeRedisJson(
         redisHistoryKey(timeframe),
-        {
-          data: store.candleMap[timeframe],
-          provider: store.source,
-          symbol: store.symbol,
-          timeframe,
-          updatedAt: store.updatedAt,
-        } satisfies Mt5RedisHistoryPayload,
+        historyPayload,
         REDIS_HISTORY_TTL_SECONDS,
       ),
     );
@@ -250,13 +257,13 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
 }
 
 async function getPersistedCounts(candleMap: Record<Timeframe, Candle[]>) {
-  if (!isRedisConfigured()) {
+  if (!isSupabaseConfigured() && !isRedisConfigured()) {
     return getCounts(candleMap);
   }
 
   const entries = await Promise.all(
     timeframes.map(async (timeframe) => {
-      const persisted = await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe));
+      const persisted = (await readSupabaseHistory(timeframe)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe)));
       return [timeframe, persisted?.data.length ?? candleMap[timeframe].length] as const;
     }),
   );
@@ -282,7 +289,27 @@ function isRedisConfigured() {
   return Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
 }
 
+function isSupabaseConfigured() {
+  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+function getPersistenceMode() {
+  if (isSupabaseConfigured()) {
+    return "supabase";
+  }
+
+  if (isRedisConfigured()) {
+    return "redis";
+  }
+
+  return "memory";
+}
+
 async function writeRedisJson(key: string, value: unknown, ttlSeconds: number) {
+  if (!isRedisConfigured()) {
+    return;
+  }
+
   await redisCommand(["SET", key, JSON.stringify(value), "EX", String(ttlSeconds)]);
 }
 
@@ -302,6 +329,122 @@ async function readRedisJson<T>(key: string): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+async function writeSupabaseTick(payload: Mt5RedisTickPayload) {
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  await supabaseRequest(`${SUPABASE_TICK_TABLE}?on_conflict=id`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({
+      id: SUPABASE_TICK_ID,
+      source: payload.provider,
+      symbol: payload.symbol,
+      tick: payload.data,
+      updated_at: payload.updatedAt,
+    }),
+  });
+}
+
+async function writeSupabaseHistory(payload: Mt5RedisHistoryPayload) {
+  if (!isSupabaseConfigured()) {
+    return;
+  }
+
+  await supabaseRequest(`${SUPABASE_HISTORY_TABLE}?on_conflict=id`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates" },
+    body: JSON.stringify({
+      id: `${SUPABASE_TICK_ID}:${payload.timeframe}`,
+      source: payload.provider,
+      symbol: payload.symbol,
+      timeframe: payload.timeframe,
+      candles: payload.data,
+      updated_at: payload.updatedAt,
+    }),
+  });
+}
+
+async function readSupabaseTick(): Promise<Mt5RedisTickPayload | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const rows = await supabaseRequest(`${SUPABASE_TICK_TABLE}?id=eq.${encodeURIComponent(SUPABASE_TICK_ID)}&select=source,symbol,tick,updated_at&limit=1`);
+    const row = Array.isArray(rows) ? rows[0] : null;
+
+    if (!row?.tick || !row?.updated_at) {
+      return null;
+    }
+
+    return {
+      data: row.tick as MarketTick,
+      provider: String(row.source ?? "MT5"),
+      symbol: String(row.symbol ?? "XAUUSD"),
+      updatedAt: String(row.updated_at),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readSupabaseHistory(timeframe: Timeframe): Promise<Mt5RedisHistoryPayload | null> {
+  if (!isSupabaseConfigured()) {
+    return null;
+  }
+
+  try {
+    const rows = await supabaseRequest(`${SUPABASE_HISTORY_TABLE}?id=eq.${encodeURIComponent(`${SUPABASE_TICK_ID}:${timeframe}`)}&select=source,symbol,timeframe,candles,updated_at&limit=1`);
+    const row = Array.isArray(rows) ? rows[0] : null;
+
+    if (!Array.isArray(row?.candles) || !row?.updated_at) {
+      return null;
+    }
+
+    return {
+      data: row.candles as Candle[],
+      provider: String(row.source ?? "MT5"),
+      symbol: String(row.symbol ?? "XAUUSD"),
+      timeframe,
+      updatedAt: String(row.updated_at),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function supabaseRequest(path: string, init: RequestInit = {}) {
+  const baseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!baseUrl || !serviceRoleKey) {
+    throw new Error("Supabase MT5 relay is not configured.");
+  }
+
+  const response = await fetch(`${baseUrl}/rest/v1/${path}`, {
+    ...init,
+    headers: {
+      apikey: serviceRoleKey,
+      authorization: `Bearer ${serviceRoleKey}`,
+      "content-type": "application/json",
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`Supabase MT5 relay unavailable (${response.status}).`);
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
 }
 
 async function redisCommand(command: string[]) {

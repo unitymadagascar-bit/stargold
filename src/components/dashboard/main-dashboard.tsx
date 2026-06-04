@@ -179,9 +179,10 @@ function Mt5ConnectionHeader({ live, spread }: { live: LiveMarketState; spread: 
           </div>
         </div>
 
-        <div className="grid w-full gap-2 text-xs sm:w-auto sm:grid-cols-4">
+        <div className="grid w-full gap-2 text-xs sm:w-auto sm:grid-cols-5">
           <HeaderMetric label="Source active" value={source} />
           <HeaderMetric label="Dernier prix" value={live.lastTick?.price ? live.lastTick.price.toFixed(2) : "--"} />
+          <HeaderMetric label="Dernier tick" value={formatTickTime(live.lastTick?.time)} />
           <HeaderMetric label="Latence" value={live.latencyMs === null ? "--" : `${Math.round(live.latencyMs)}ms`} />
           <HeaderMetric label="Spread" value={spread === null ? "--" : spread.toFixed(2)} />
         </div>
@@ -645,4 +646,12 @@ function formatDxyDirection(direction: FundamentalContext["dxy"]["direction"]) {
 
 function formatPrice(value?: number) {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value.toFixed(2) : "--";
+}
+
+function formatTickTime(value?: number) {
+  if (!value) {
+    return "--";
+  }
+
+  return new Date(value * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }

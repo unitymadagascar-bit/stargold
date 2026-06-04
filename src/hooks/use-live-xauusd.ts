@@ -320,11 +320,11 @@ function getEndpointCandidates(pathOrUrl: string) {
     return [pathOrUrl];
   }
 
-  if (typeof window === "undefined" || isLocalHost(window.location.hostname)) {
+  if (typeof window === "undefined" || !isLocalHost(window.location.hostname)) {
     return [pathOrUrl];
   }
 
-  return [`${localBridgeOrigin}${pathOrUrl}`, pathOrUrl];
+  return [pathOrUrl, `${localBridgeOrigin}${pathOrUrl}`];
 }
 
 function isLocalHost(hostname: string) {
@@ -340,7 +340,7 @@ function getMarketMessage(data: unknown) {
     return "Flux XAUUSD live connecte.";
   }
 
-  const source = "source" in data ? String(data.source) : "marché";
+  const source = "source" in data ? String(data.source) : "marche";
   const warning = "warning" in data && data.warning ? String(data.warning) : "";
 
   if (warning) {

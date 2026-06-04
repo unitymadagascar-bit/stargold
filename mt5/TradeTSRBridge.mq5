@@ -1,13 +1,13 @@
 // TradeTSRBridge.mq5
 // Attach this Expert Advisor to the XAUUSD chart in MetaTrader 5.
+// It sends ticks and candles to the Star Gold By TSR cloud relay.
 // Before running it, add these URLs to:
 // Tools > Options > Expert Advisors > Allow WebRequest for listed URL.
 //
-// http://127.0.0.1:3000
 // https://tradetsr.vercel.app
 
 #property strict
-#property version "1.10"
+#property version "1.11"
 
 input string InpEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
 input bool InpUseCloudFallback = true;
@@ -145,6 +145,8 @@ int PostJsonToEndpoint(const string endpoint, const string body)
 
    if(status == -1)
       Print("Star Gold By TSR bridge WebRequest failed. Error: ", GetLastError(), ". Add the URL in MT5 WebRequest settings: ", endpoint);
+   else if(status < 200 || status >= 300)
+      Print("Star Gold By TSR bridge HTTP error: ", status, ". Endpoint: ", endpoint, ". Response: ", CharArrayToString(result));
 
    return status;
 }

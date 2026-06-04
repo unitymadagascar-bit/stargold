@@ -32,9 +32,9 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
     if (data.length) {
       return {
         data,
-        provider: getEodhdSourceLabel(),
+        provider: `Fallback, not live MT5 - ${getEodhdSourceLabel()}`,
         symbol: getEodhdRestSymbol(),
-        warning: null,
+        warning: "Fallback, not live MT5. En attente du prochain tick MT5.",
       };
     }
 
@@ -44,9 +44,9 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
 
     return {
       data,
-      provider: getYahooSourceLabel(),
+      provider: `Fallback, not live MT5 - ${getYahooSourceLabel()}`,
       symbol: getYahooGoldSymbol(),
-      warning: `Fallback Yahoo Finance utilise car EODHD intraday/live est indisponible: ${formatError(error)}`,
+      warning: `Fallback, not live MT5. Yahoo Finance utilise car EODHD intraday/live est indisponible: ${formatError(error)}`,
     };
   }
 }
@@ -72,18 +72,18 @@ export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
 
     return {
       data,
-      provider: getEodhdSourceLabel(),
+      provider: `Fallback, not live MT5 - ${getEodhdSourceLabel()}`,
       symbol: getEodhdRestSymbol(),
-      warning: null,
+      warning: "Fallback, not live MT5. En attente du prochain tick MT5.",
     };
   } catch (error) {
     const data = await fetchYahooGoldTick();
 
     return {
       data,
-      provider: getYahooSourceLabel(),
+      provider: `Fallback, not live MT5 - ${getYahooSourceLabel()}`,
       symbol: getYahooGoldSymbol(),
-      warning: `Fallback Yahoo Finance utilise car EODHD real-time est indisponible: ${formatError(error)}`,
+      warning: `Fallback, not live MT5. Yahoo Finance utilise car EODHD real-time est indisponible: ${formatError(error)}`,
     };
   }
 }

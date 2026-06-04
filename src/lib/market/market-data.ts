@@ -23,7 +23,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
   }
 
   if (!isExternalFallbackEnabled()) {
-    throw new Error("MT5 non connecte. Lance le bridge TradeTSR dans MT5 pour synchroniser les bougies avec ton broker.");
+    throw new Error("MT5 non connecte. Lance le bridge Star Gold By TSR dans MT5 pour synchroniser les bougies avec ton broker.");
   }
 
   try {
@@ -64,7 +64,7 @@ export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
   }
 
   if (!isExternalFallbackEnabled()) {
-    throw new Error("MT5 non connecte. Lance le bridge TradeTSR dans MT5 pour synchroniser le prix avec ton broker.");
+    throw new Error("MT5 non connecte. Lance le bridge Star Gold By TSR dans MT5 pour synchroniser le prix avec ton broker.");
   }
 
   try {

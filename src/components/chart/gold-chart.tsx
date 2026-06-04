@@ -499,7 +499,7 @@ function ChartEmptyState({
             </div>
 
             <div className="mt-4 grid gap-2 md:grid-cols-2">
-              <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value="Lance TradeTSRBridge sur XAUUSD" />
+              <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value="Lance Star Gold Bridge sur XAUUSD" />
               <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value="Choisis M1, M5 ou M15 pour scalp" />
               <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value="Attends les premieres bougies broker" />
               <EmptyStep icon={<ShieldAlert size={16} />} label="4. Risque" value="Aucun signal sans confirmation live" />

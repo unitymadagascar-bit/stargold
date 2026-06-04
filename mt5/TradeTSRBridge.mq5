@@ -124,7 +124,7 @@ void PostJson(const string body)
    {
       int fallbackStatus = PostJsonToEndpoint(InpCloudFallbackEndpoint, body);
       if(fallbackStatus == -1)
-         Print("TradeTSR cloud fallback failed too. Add this URL in MT5 WebRequest settings: ", InpCloudFallbackEndpoint);
+         Print("Star Gold By TSR cloud fallback failed too. Add this URL in MT5 WebRequest settings: ", InpCloudFallbackEndpoint);
    }
 }
 
@@ -144,7 +144,7 @@ int PostJsonToEndpoint(const string endpoint, const string body)
    int status = WebRequest("POST", url, headers, 5000, data, result, resultHeaders);
 
    if(status == -1)
-      Print("TradeTSR bridge WebRequest failed. Error: ", GetLastError(), ". Add the URL in MT5 WebRequest settings: ", endpoint);
+      Print("Star Gold By TSR bridge WebRequest failed. Error: ", GetLastError(), ". Add the URL in MT5 WebRequest settings: ", endpoint);
 
    return status;
 }

@@ -25,6 +25,7 @@ export function useLiveXauusd(): LiveMarketState {
   const [state, setState] = useState<LiveMarketState>({
     status: "connecting",
     message: "Connexion au flux XAUUSD live.",
+    source: null,
     lastTick: null,
     serverOffsetMinutes: Number.isFinite(serverOffsetMinutes) ? serverOffsetMinutes : 0,
     latencyMs: null,
@@ -40,7 +41,7 @@ export function useLiveXauusd(): LiveMarketState {
     [],
   );
 
-  function processTick(tick: MarketTick, message = "Flux XAUUSD live connecte.") {
+  function processTick(tick: MarketTick, message = "Flux XAUUSD live connecte.", source: string | null = null) {
     const latencyMs = Math.max(0, Date.now() - tick.time * 1000);
 
     setState((current) => {
@@ -58,6 +59,7 @@ export function useLiveXauusd(): LiveMarketState {
         ...current,
         status: "live",
         message,
+        source,
         lastTick: tick,
         latencyMs,
         candleMap,
@@ -67,12 +69,13 @@ export function useLiveXauusd(): LiveMarketState {
 
   function processMessage(data: unknown, message?: string) {
     const marketMessage = message ?? getMarketMessage(data);
+    const marketSource = getMarketSource(data);
 
     if (Array.isArray(data)) {
       for (const item of data) {
         const tick = normalizeProviderTick(item);
         if (tick) {
-          processTick(tick, marketMessage);
+          processTick(tick, marketMessage, marketSource);
         }
       }
       return;
@@ -80,7 +83,7 @@ export function useLiveXauusd(): LiveMarketState {
 
     const tick = normalizeProviderTick(data);
     if (tick) {
-      processTick(tick, marketMessage);
+      processTick(tick, marketMessage, marketSource);
     }
   }
 
@@ -243,14 +246,16 @@ export function useLiveXauusd(): LiveMarketState {
           const payload = JSON.parse(messageEvent.data);
           setState((current) => ({
             ...current,
-            status: current.lastTick ? "reconnecting" : "error",
-            message: payload?.message ?? "MT5 non connecte.",
-          }));
+          status: current.lastTick ? "reconnecting" : "error",
+          message: payload?.message ?? "MT5 non connecte.",
+          source: payload?.source ? String(payload.source) : current.source,
+        }));
         } catch {
           setState((current) => ({
             ...current,
             status: current.lastTick ? "reconnecting" : "error",
             message: "MT5 non connecte.",
+            source: current.source,
           }));
         }
       });
@@ -343,4 +348,16 @@ function getMarketMessage(data: unknown) {
   }
 
   return `Flux reel ${source} actif.`;
+}
+
+function getMarketSource(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  if ("source" in data && data.source) {
+    return String(data.source);
+  }
+
+  return null;
 }

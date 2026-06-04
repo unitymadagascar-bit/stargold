@@ -79,7 +79,7 @@ async function fetchYahooChart(interval: YahooInterval, range: string): Promise<
           cache: "no-store",
           headers: {
             accept: "application/json",
-            "user-agent": "Mozilla/5.0 TradeTSR/1.0",
+            "user-agent": "Mozilla/5.0 StarGoldByTSR/1.0",
           },
         });
 

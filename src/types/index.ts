@@ -43,6 +43,7 @@ export type LiveConnectionStatus = "missing-config" | "connecting" | "live" | "r
 export interface LiveMarketState {
   status: LiveConnectionStatus;
   message: string;
+  source: string | null;
   lastTick: MarketTick | null;
   serverOffsetMinutes: number;
   latencyMs: number | null;

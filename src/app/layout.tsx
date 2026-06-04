@@ -13,8 +13,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TradeTSR Gold Assistant",
-  description: "Assistant professionnel d'analyse GOLD / XAUUSD.",
+  metadataBase: new URL("https://tradetsr.vercel.app"),
+  title: "Star Gold By TSR",
+  description: "Gold trading assistant for MT5, XAUUSD analysis, scalping decisions and risk control.",
+  applicationName: "Star Gold By TSR",
+  icons: {
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/star-gold-icon.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  openGraph: {
+    title: "Star Gold By TSR",
+    description: "Gold trading assistant for MT5.",
+    images: [{ url: "/star-gold-og.png", width: 1200, height: 630, alt: "Star Gold By TSR logo" }],
+  },
 };
 
 export default function RootLayout({

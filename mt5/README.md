@@ -1,6 +1,6 @@
-# TradeTSR MT5 Bridge
+# Star Gold By TSR MT5 Bridge
 
-Ce bridge synchronise l'application TradeTSR avec le flux exact de ton MetaTrader 5, directement vers l'application Vercel.
+Ce bridge synchronise Star Gold By TSR avec le flux exact de ton MetaTrader 5, directement vers l'application Vercel.
 
 ## Installation
 

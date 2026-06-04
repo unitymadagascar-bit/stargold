@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, Gauge, ShieldCheck, Target, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import { Activity, Gauge, ShieldCheck, Target, Wifi, WifiOff, Zap } from "lucide-react";
+import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -49,6 +49,9 @@ export function MainDashboard() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1340px] px-3 py-3 sm:px-4 lg:px-5">
+      <BrandHeader />
+      <Mt5ConnectionHeader live={live} spread={spread} />
+
       <section className="grid gap-3 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,1fr)]">
         <MarketSummary
           activeAnalysis={activeAnalysis}
@@ -129,6 +132,70 @@ export function MainDashboard() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function BrandHeader() {
+  return (
+    <header className="mb-3 rounded-md border border-amber-300/20 bg-[#11100c] px-4 py-3 shadow-[0_18px_48px_rgba(0,0,0,0.24)]">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <img className="size-14 shrink-0 rounded-md border border-amber-300/25 bg-black object-cover" src="/star-gold-icon.png" alt="Star Gold By TSR" />
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/80">Gold Trading Assistant For MT5</p>
+            <h1 className="mt-1 text-2xl font-black tracking-normal text-white">Star Gold By TSR</h1>
+            <p className="mt-1 text-xs text-slate-400">XAUUSD live analysis, scalping decisions, risk control.</p>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 font-mono font-bold text-amber-100">XAUUSD</span>
+          <span className="rounded-md border border-white/10 bg-black/25 px-3 py-2 font-semibold text-slate-300">MT5 Bridge Ready</span>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Mt5ConnectionHeader({ live, spread }: { live: LiveMarketState; spread: number | null }) {
+  const source = live.source ?? "unknown";
+  const mt5Connected = live.status === "live" && source.toUpperCase() === "MT5";
+  const liveFallback = live.status === "live" && !mt5Connected;
+  const statusLabel = mt5Connected ? "MT5 connecte" : liveFallback ? "MT5 non connecte - fallback actif" : "MT5 non connecte";
+  const statusClass = mt5Connected
+    ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
+    : liveFallback
+      ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+      : "border-rose-300/25 bg-rose-300/10 text-rose-100";
+
+  return (
+    <section className={`mb-3 rounded-md border px-4 py-3 ${statusClass}`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-black/25 text-white">{mt5Connected ? <Wifi size={18} /> : <WifiOff size={18} />}</span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] opacity-75">Connexion application / MT5</p>
+            <h1 className="mt-0.5 text-lg font-black text-white">{statusLabel}</h1>
+            <p className="mt-1 truncate text-xs text-slate-300">{live.message}</p>
+          </div>
+        </div>
+
+        <div className="grid w-full gap-2 text-xs sm:w-auto sm:grid-cols-4">
+          <HeaderMetric label="Source active" value={source} />
+          <HeaderMetric label="Dernier prix" value={live.lastTick?.price ? live.lastTick.price.toFixed(2) : "--"} />
+          <HeaderMetric label="Latence" value={live.latencyMs === null ? "--" : `${Math.round(live.latencyMs)}ms`} />
+          <HeaderMetric label="Spread" value={spread === null ? "--" : spread.toFixed(2)} />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HeaderMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-black/20 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] opacity-70">{label}</p>
+      <p className="mt-1 font-mono text-sm font-bold text-white">{value}</p>
+    </div>
   );
 }
 

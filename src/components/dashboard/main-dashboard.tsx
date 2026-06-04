@@ -161,7 +161,7 @@ function MarketSummary({
             <span>L {formatPrice(latestCandle?.low)}</span>
             <span>C {formatPrice(latestCandle?.close)}</span>
           </div>
-          <p className="mt-2 text-xs text-slate-500">Source: MT5 bridge + broker candles</p>
+          <p className="mt-2 text-xs text-slate-500">Source: MT5 cloud bridge, fallback marche si MT5 demarre plus lentement</p>
         </div>
 
         <div className="flex items-center gap-4 border-l border-white/10 pl-5">

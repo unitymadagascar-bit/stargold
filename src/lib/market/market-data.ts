@@ -93,5 +93,5 @@ function formatError(error: unknown) {
 }
 
 function isExternalFallbackEnabled() {
-  return process.env.ALLOW_EXTERNAL_GOLD_FALLBACK === "true";
+  return process.env.ALLOW_EXTERNAL_GOLD_FALLBACK !== "false" && (process.env.ALLOW_EXTERNAL_GOLD_FALLBACK === "true" || process.env.VERCEL === "1");
 }

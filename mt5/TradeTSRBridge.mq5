@@ -1,12 +1,17 @@
 // TradeTSRBridge.mq5
 // Attach this Expert Advisor to the XAUUSD chart in MetaTrader 5.
-// Before running it, add http://127.0.0.1:3000 to:
+// Before running it, add these URLs to:
 // Tools > Options > Expert Advisors > Allow WebRequest for listed URL.
+//
+// http://127.0.0.1:3000
+// https://tradetsr.vercel.app
 
 #property strict
-#property version "1.00"
+#property version "1.10"
 
-input string InpEndpoint = "http://127.0.0.1:3000/api/market/mt5/ingest";
+input string InpEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
+input bool InpUseCloudFallback = true;
+input string InpCloudFallbackEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
 input string InpBridgeToken = "";
 input int InpBarsPerTimeframe = 700;
 input int InpPushIntervalSeconds = 1;
@@ -113,7 +118,19 @@ string RatesToJson(ENUM_TIMEFRAMES timeframe)
 
 void PostJson(const string body)
 {
-   string url = InpEndpoint;
+   int status = PostJsonToEndpoint(InpEndpoint, body);
+
+   if(status == -1 && InpUseCloudFallback && InpCloudFallbackEndpoint != "" && InpCloudFallbackEndpoint != InpEndpoint)
+   {
+      int fallbackStatus = PostJsonToEndpoint(InpCloudFallbackEndpoint, body);
+      if(fallbackStatus == -1)
+         Print("TradeTSR cloud fallback failed too. Add this URL in MT5 WebRequest settings: ", InpCloudFallbackEndpoint);
+   }
+}
+
+int PostJsonToEndpoint(const string endpoint, const string body)
+{
+   string url = endpoint;
    if(InpBridgeToken != "")
       url += "?token=" + InpBridgeToken;
 
@@ -127,7 +144,9 @@ void PostJson(const string body)
    int status = WebRequest("POST", url, headers, 5000, data, result, resultHeaders);
 
    if(status == -1)
-      Print("TradeTSR bridge WebRequest failed. Error: ", GetLastError(), ". Add the URL in MT5 WebRequest settings: ", InpEndpoint);
+      Print("TradeTSR bridge WebRequest failed. Error: ", GetLastError(), ". Add the URL in MT5 WebRequest settings: ", endpoint);
+
+   return status;
 }
 
 string JsonEscape(string value)

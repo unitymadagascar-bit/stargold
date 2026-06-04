@@ -1,6 +1,6 @@
 # TradeTSR MT5 Bridge
 
-Ce bridge synchronise l'application TradeTSR avec le flux exact de ton MetaTrader 5.
+Ce bridge synchronise l'application TradeTSR avec le flux exact de ton MetaTrader 5, directement vers l'application Vercel.
 
 ## Installation
 
@@ -9,23 +9,38 @@ Ce bridge synchronise l'application TradeTSR avec le flux exact de ton MetaTrade
 3. Redemarre MT5 ou clique droit dans `Navigator > Expert Advisors > Refresh`.
 4. Va dans `Tools > Options > Expert Advisors`.
 5. Active `Allow WebRequest for listed URL`.
-6. Ajoute cette URL :
+6. Ajoute ces URLs :
+
+```text
+https://tradetsr.vercel.app
+http://127.0.0.1:3000
+```
+
+7. Attache `TradeTSRBridge` au graphique `XAUUSD`.
+8. Active `Algo Trading`.
+9. Ouvre l'application :
+
+```text
+https://tradetsr.vercel.app
+```
+
+## Mode local optionnel
+
+Le bridge peut toujours envoyer vers le serveur local si tu lances :
 
 ```text
 http://127.0.0.1:3000
 ```
 
-7. Lance l'application en local sur le port 3000.
-8. Attache `TradeTSRBridge` au graphique `XAUUSD`.
-9. Active `Algo Trading`.
+Mais ce n'est plus obligatoire pour utiliser l'application Vercel.
 
 ## Resultat attendu
 
-L'application doit afficher `Flux reel MT5 actif` et les prix doivent correspondre au bid/ask de ton broker MT5.
+L'application doit afficher `Flux reel MT5 actif` quand MT5 pousse ses donnees. Si MT5 demarre plus lentement, Vercel affiche un flux marche externe en attendant le premier snapshot MT5.
 
-Si l'application affiche `MT5 non connecte`, verifie :
+Si l'application affiche encore `MT5 non connecte`, verifie :
 
-- l'URL WebRequest autorisee dans MT5 ;
+- l'URL WebRequest `https://tradetsr.vercel.app` autorisee dans MT5 ;
 - le bouton `Algo Trading` ;
-- le port local `http://127.0.0.1:3000` ;
-- l'onglet `Experts` dans MT5 pour les erreurs WebRequest.
+- l'onglet `Experts` dans MT5 pour les erreurs WebRequest ;
+- que l'Expert Advisor utilise bien l'endpoint `https://tradetsr.vercel.app/api/market/mt5/ingest`.

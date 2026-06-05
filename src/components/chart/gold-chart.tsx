@@ -71,6 +71,7 @@ export function GoldChart({
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const [fvgOverlay, setFvgOverlay] = useState<OrderBlockOverlay | null>(null);
   const [riskRewardOverlay, setRiskRewardOverlay] = useState<RiskRewardOverlay | null>(null);
+  const [riskRewardNotice, setRiskRewardNotice] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
@@ -338,6 +339,13 @@ export function GoldChart({
       plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
     }
 
+    if (displaySettings.showRiskRewardBox && plan.decision !== "WAIT") {
+      addPriceLine(series, priceLineRefs.current, plan.entry, "#fde047", "RR Entry");
+      addPriceLine(series, priceLineRefs.current, plan.stopLoss, "#fb7185", "RR SL");
+      addPriceLine(series, priceLineRefs.current, plan.takeProfits[0], "#34d399", "RR TP1");
+      addPriceLine(series, priceLineRefs.current, plan.takeProfits[1], "#22c55e", "RR TP2");
+    }
+
     if (displaySettings.showOrderBlocks && activeOrderBlock) {
       const color = activeOrderBlock.direction === "bullish" ? "#22c55e" : "#ef4444";
       addPriceLine(series, priceLineRefs.current, activeOrderBlock.high, color, `OB ${activeOrderBlock.score}/100`);
@@ -359,7 +367,7 @@ export function GoldChart({
       addPriceLine(series, priceLineRefs.current, fvg.high, color, `FVG ${fvg.score}/100`);
       addPriceLine(series, priceLineRefs.current, fvg.low, color, `${fvg.fillPercent}% fill`);
     }
-  }, [candles, displaySettings, fvg, lastPrice, lastTick?.ask, lastTick?.bid, orb, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
+  }, [candles, displaySettings, fvg, lastPrice, lastTick?.ask, lastTick?.bid, orb, orderBlock, plan.decision, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
 
   useEffect(() => {
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
@@ -431,12 +439,14 @@ export function GoldChart({
 
     if (!series || !chart || !container || !displaySettings.showRiskRewardBox) {
       setRiskRewardOverlay(null);
+      setRiskRewardNotice(null);
       return;
     }
 
     const updateOverlay = () => {
-      const overlay = buildRiskRewardOverlay({ containerWidth: container.clientWidth, plan, series });
+      const overlay = buildRiskRewardOverlay({ containerHeight: container.clientHeight, containerWidth: container.clientWidth, plan, series });
       setRiskRewardOverlay(overlay);
+      setRiskRewardNotice(overlay ? null : getRiskRewardNotice(plan));
     };
 
     updateOverlay();
@@ -640,6 +650,7 @@ export function GoldChart({
           </div>
         ) : null}
         {riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
+        {!riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
         {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
@@ -866,10 +877,12 @@ function addPriceLine(
 }
 
 function buildRiskRewardOverlay({
+  containerHeight,
   containerWidth,
   plan,
   series,
 }: {
+  containerHeight: number;
   containerWidth: number;
   plan: TradePlan;
   series: ISeriesApi<"Candlestick">;
@@ -908,49 +921,53 @@ function buildRiskRewardOverlay({
   }
 
   const compact = containerWidth < 560;
-  const left = compact ? 44 : Math.max(62, Math.floor(containerWidth * 0.54));
-  const width = compact ? Math.max(120, containerWidth - left - 44) : Math.max(170, Math.min(310, containerWidth - left - 62));
+  const left = compact ? 30 : Math.max(48, Math.floor(containerWidth * 0.18));
+  const width = compact ? Math.max(145, containerWidth - left - 54) : Math.max(210, Math.min(360, containerWidth * 0.42));
   const preview = plan.decision.includes("WATCH");
   const tpForRatio = Math.abs(tp1 - entry);
   const riskForRatio = Math.abs(entry - stopLoss);
   const rr = riskForRatio > 0 ? tpForRatio / riskForRatio : plan.riskReward;
+  const profitTop = clampCoordinate(Math.min(entryY, tp2Y), containerHeight);
+  const profitBottom = clampCoordinate(Math.max(entryY, tp2Y), containerHeight);
+  const riskTop = clampCoordinate(Math.min(entryY, stopY), containerHeight);
+  const riskBottom = clampCoordinate(Math.max(entryY, stopY), containerHeight);
 
   return {
     entry,
-    entryY,
+    entryY: clampCoordinate(entryY, containerHeight),
     left,
     preview,
     profit: {
-      top: Math.min(entryY, tp2Y),
-      height: Math.max(4, Math.abs(tp2Y - entryY)),
+      top: profitTop,
+      height: Math.max(8, profitBottom - profitTop),
     },
     risk: {
-      top: Math.min(entryY, stopY),
-      height: Math.max(4, Math.abs(stopY - entryY)),
+      top: riskTop,
+      height: Math.max(8, riskBottom - riskTop),
     },
     rr: Number(rr.toFixed(2)),
     sl: stopLoss,
-    slY: stopY,
+    slY: clampCoordinate(stopY, containerHeight),
     tp1,
-    tp1Y,
+    tp1Y: clampCoordinate(tp1Y, containerHeight),
     tp2,
-    tp2Y,
+    tp2Y: clampCoordinate(tp2Y, containerHeight),
     width,
   };
 }
 
 function RiskRewardBox({ overlay }: { overlay: RiskRewardOverlay }) {
   const borderStyle = overlay.preview ? "border-dashed" : "border-solid";
-  const panelClass = overlay.preview ? "opacity-80" : "opacity-95";
+  const panelClass = overlay.preview ? "opacity-85" : "opacity-100";
 
   return (
     <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: overlay.left, width: overlay.width }}>
       <div
-        className={`absolute left-0 right-0 rounded-sm border ${borderStyle} border-emerald-300/70 bg-emerald-400/16 ${panelClass}`}
+        className={`absolute left-0 right-0 rounded-sm border-2 ${borderStyle} border-emerald-300/80 bg-emerald-300/24 ${panelClass}`}
         style={{ top: overlay.profit.top, height: overlay.profit.height }}
       />
       <div
-        className={`absolute left-0 right-0 rounded-sm border ${borderStyle} border-rose-300/70 bg-rose-400/16 ${panelClass}`}
+        className={`absolute left-0 right-0 rounded-sm border-2 ${borderStyle} border-rose-300/80 bg-rose-300/24 ${panelClass}`}
         style={{ top: overlay.risk.top, height: overlay.risk.height }}
       />
       <RiskRewardLine color="bg-amber-200" label={`Entry ${formatPrice(overlay.entry)}`} top={overlay.entryY} />
@@ -970,6 +987,32 @@ function RiskRewardBox({ overlay }: { overlay: RiskRewardOverlay }) {
       ) : null}
     </div>
   );
+}
+
+function RiskRewardNotice({ message }: { message: string }) {
+  return (
+    <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[320px] rounded-md border border-amber-300/30 bg-black/75 px-3 py-2 shadow-lg">
+      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">Risk/Reward Box</p>
+      <p className="mt-1 text-xs leading-5 text-slate-100">{message}</p>
+    </div>
+  );
+}
+
+function getRiskRewardNotice(plan: TradePlan) {
+  if (plan.decision === "WAIT" || plan.direction === "Neutral") {
+    return "Masque: la decision finale est WAIT. Le RR box apparait seulement quand un plan WATCH ou SCALP READY existe.";
+  }
+
+  const validPrices = [plan.entry, plan.stopLoss, plan.takeProfits[0], plan.takeProfits[1]].every((price) => Number.isFinite(price) && price > 0);
+  if (!validPrices) {
+    return "Masque: entry, stop loss, TP1 ou TP2 manque dans le plan final.";
+  }
+
+  return "Masque: les niveaux du plan ne sont pas coherents avec le sens BUY/SELL.";
+}
+
+function clampCoordinate(value: number, height: number) {
+  return Math.max(0, Math.min(height, value));
 }
 
 function RiskRewardLine({ color, label, top }: { color: string; label: string; top: number }) {

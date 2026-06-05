@@ -1,10 +1,22 @@
 export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
-export type Signal = "STRONG BUY" | "BUY SCALP READY" | "WATCH BUY" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "STRONG SELL";
+export type Signal = "STRONG BUY" | "BUY SCALP READY" | "WATCH BUY" | "ORB BREAKOUT WATCH" | "FVG RETEST WATCH" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "STRONG SELL";
 
 export type SignalMode = "conservative" | "scalping";
 
 export type ScalpingSensitivity = "safe" | "balanced" | "aggressive";
+
+export type OrbDuration = 5 | 15 | 30;
+
+export type MovingAverageType = "EMA" | "SMA";
+
+export type OrbSession = "London" | "New York";
+
+export type OrbStatus = "WAIT" | "FORMING" | "ORB BREAKOUT WATCH" | "FVG RETEST WATCH" | "ORB BUY WATCH" | "ORB SELL WATCH" | "ORB BUY CONFIRMED" | "ORB SELL CONFIRMED" | "ORB FAILED";
+
+export type FvgDirection = "bullish" | "bearish";
+
+export type FvgFillState = "fresh" | "partial" | "full" | "invalid";
 
 export type Direction = "Bullish" | "Bearish" | "Neutral";
 
@@ -148,7 +160,60 @@ export interface TechnicalAnalysis {
   orderBlock: OrderBlockZone | null;
   liquidity: LiquidityAnalysis;
   fvg: { low: number; high: number } | null;
+  fvgAnalysis: FvgAnalysis | null;
+  orb: OrbAnalysis | null;
+  trendFilter: TrendFilterAnalysis | null;
   displacement: boolean;
+}
+
+export interface FvgAnalysis {
+  direction: FvgDirection;
+  low: number;
+  high: number;
+  originTime: number;
+  timeframe: Timeframe;
+  fillPercent: number;
+  fillState: FvgFillState;
+  fresh: boolean;
+  touched: boolean;
+  rejectionConfirmed: boolean;
+  score: number;
+  missingConfirmation: string;
+}
+
+export interface OrbAnalysis {
+  session: OrbSession;
+  duration: OrbDuration;
+  status: OrbStatus;
+  direction: Direction;
+  high: number;
+  low: number;
+  startTime: number;
+  endTime: number;
+  breakoutTime: number | null;
+  breakoutConfirmed: boolean;
+  retestConfirmed: boolean;
+  fakeBreakout: boolean;
+  momentumAligned: boolean;
+  atrOk: boolean;
+  spreadOk: boolean;
+  newsSafe: boolean;
+  entryZone: { low: number; high: number };
+  stopLoss: number;
+  takeProfits: [number, number];
+  invalidation: string;
+  confidence: number;
+  riskLevel: "faible" | "modere" | "eleve";
+  missingConfirmation: string;
+}
+
+export interface TrendFilterAnalysis {
+  type: MovingAverageType;
+  period: number;
+  value: number;
+  bias: Direction;
+  strongAgainst: boolean;
+  distancePercent: number;
 }
 
 export interface MacroContext {
@@ -222,6 +287,9 @@ export interface TimeframeAnalysis {
   newsNearby: boolean;
   orderBlock: OrderBlockZone | null;
   liquidity: LiquidityAnalysis | null;
+  fvg: FvgAnalysis | null;
+  orb: OrbAnalysis | null;
+  trendFilter: TrendFilterAnalysis | null;
   riskReward: number;
   summary: string;
 }
@@ -258,6 +326,9 @@ export interface TradePlan {
   scoring: ScoringBreakdown;
   orderBlock: OrderBlockZone | null;
   liquidity: LiquidityAnalysis | null;
+  fvg: FvgAnalysis | null;
+  orb: OrbAnalysis | null;
+  trendFilter: TrendFilterAnalysis | null;
 }
 
 export interface RiskInput {

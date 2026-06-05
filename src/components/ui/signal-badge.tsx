@@ -4,6 +4,8 @@ const styles: Record<Signal, string> = {
   "STRONG BUY": "border-emerald-400/40 bg-emerald-400/14 text-emerald-100",
   "BUY SCALP READY": "border-lime-400/35 bg-lime-400/12 text-lime-200",
   "WATCH BUY": "border-teal-400/35 bg-teal-400/12 text-teal-100",
+  "ORB BREAKOUT WATCH": "border-indigo-400/35 bg-indigo-400/12 text-indigo-100",
+  "FVG RETEST WATCH": "border-cyan-400/35 bg-cyan-400/12 text-cyan-100",
   WAIT: "border-sky-400/35 bg-sky-400/12 text-sky-200",
   "WATCH SELL": "border-amber-400/35 bg-amber-400/12 text-amber-100",
   "SELL SCALP READY": "border-orange-400/35 bg-orange-400/12 text-orange-200",

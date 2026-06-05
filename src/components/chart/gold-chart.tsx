@@ -15,7 +15,7 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, LiveConnectionStatus, MarketTick, OrderBlockZone, Timeframe, TradePlan } from "@/types";
+import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketTick, OrbAnalysis, OrderBlockZone, Timeframe, TradePlan } from "@/types";
 import { calculateRSI } from "@/lib/indicators";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -32,6 +32,8 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showOrderBlocks: true,
   showLiquidityLevels: false,
   showRsi: true,
+  showOrb: true,
+  showFvg: true,
   showLegend: false,
   showEmptyHelper: true,
 };
@@ -46,6 +48,8 @@ export function GoldChart({
   connectionStatus,
   lastTick,
   orderBlock,
+  fvg,
+  orb,
   onTimeframeChange,
   plan,
   timeframe,
@@ -55,6 +59,8 @@ export function GoldChart({
   connectionStatus: LiveConnectionStatus;
   lastTick: MarketTick | null;
   orderBlock?: OrderBlockZone | null;
+  fvg?: FvgAnalysis | null;
+  orb?: OrbAnalysis | null;
   onTimeframeChange: (timeframe: Timeframe) => void;
   plan: TradePlan;
   timeframe: Timeframe;
@@ -62,6 +68,7 @@ export function GoldChart({
   const candles = candleMap[timeframe];
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
+  const [fvgOverlay, setFvgOverlay] = useState<OrderBlockOverlay | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
@@ -339,7 +346,18 @@ export function GoldChart({
       addPriceLine(series, priceLineRefs.current, Math.min(...candles.slice(-160).map((candle) => candle.low)), "#38bdf8", "Support");
       addPriceLine(series, priceLineRefs.current, Math.max(...candles.slice(-160).map((candle) => candle.high)), "#f59e0b", "Resistance");
     }
-  }, [candles, displaySettings, lastPrice, lastTick?.ask, lastTick?.bid, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
+
+    if (displaySettings.showOrb && orb) {
+      addPriceLine(series, priceLineRefs.current, orb.high, "#facc15", `${orb.session} ORB H`);
+      addPriceLine(series, priceLineRefs.current, orb.low, "#facc15", `${orb.session} ORB L`);
+    }
+
+    if (displaySettings.showFvg && fvg) {
+      const color = fvg.direction === "bullish" ? "#22c55e" : "#ef4444";
+      addPriceLine(series, priceLineRefs.current, fvg.high, color, `FVG ${fvg.score}/100`);
+      addPriceLine(series, priceLineRefs.current, fvg.low, color, `${fvg.fillPercent}% fill`);
+    }
+  }, [candles, displaySettings, fvg, lastPrice, lastTick?.ask, lastTick?.bid, orb, orderBlock, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
 
   useEffect(() => {
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
@@ -377,6 +395,32 @@ export function GoldChart({
       chartRef.current?.unsubscribeCrosshairMove(updateOverlay);
     };
   }, [candles.length, displaySettings.showOrderBlocks, orderBlock, plan.orderBlock, timeframe]);
+
+  useEffect(() => {
+    const series = seriesRef.current;
+
+    if (!series || !fvg || !displaySettings.showFvg) {
+      setFvgOverlay(null);
+      return;
+    }
+
+    const high = series.priceToCoordinate(fvg.high);
+    const low = series.priceToCoordinate(fvg.low);
+
+    if (high === null || low === null) {
+      setFvgOverlay(null);
+      return;
+    }
+
+    const bullish = fvg.direction === "bullish";
+    setFvgOverlay({
+      top: Math.min(high, low),
+      height: Math.max(4, Math.abs(low - high)),
+      background: bullish ? "rgba(34, 197, 94, 0.10)" : "rgba(239, 68, 68, 0.10)",
+      border: bullish ? "rgba(34, 197, 94, 0.45)" : "rgba(239, 68, 68, 0.45)",
+      label: `${bullish ? "Bullish" : "Bearish"} FVG ${fvg.score}/100 - ${fvg.fillPercent}% fill`,
+    });
+  }, [candles.length, displaySettings.showFvg, fvg, timeframe]);
 
   function keepLatestCandleVisible(resetWidth = false) {
     const timeScale = chartRef.current?.timeScale();
@@ -540,6 +584,24 @@ export function GoldChart({
             </span>
           </div>
         ) : null}
+        {fvgOverlay ? (
+          <div
+            className="pointer-events-none absolute inset-x-0 z-10 border-y"
+            style={{
+              top: fvgOverlay.top,
+              height: fvgOverlay.height,
+              background: fvgOverlay.background,
+              borderColor: fvgOverlay.border,
+            }}
+          >
+            <span
+              className="absolute left-2 top-1 rounded px-2 py-0.5 font-mono text-[10px] font-semibold text-white shadow-lg"
+              style={{ background: fvgOverlay.border }}
+            >
+              {fvgOverlay.label}
+            </span>
+          </div>
+        ) : null}
         {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
@@ -596,6 +658,8 @@ function DisplaySettingsPanel({
         <DisplayToggle checked={settings.showOrderBlocks} label="Show order block zones" onChange={(value) => update("showOrderBlocks", value)} />
         <DisplayToggle checked={settings.showTradeLevels} label="Show trade levels" onChange={(value) => update("showTradeLevels", value)} />
         <DisplayToggle checked={settings.showRsi} label="Show RSI 14" onChange={(value) => update("showRsi", value)} />
+        <DisplayToggle checked={settings.showOrb} label="Show ORB high/low" onChange={(value) => update("showOrb", value)} />
+        <DisplayToggle checked={settings.showFvg} label="Show FVG zones" onChange={(value) => update("showFvg", value)} />
         <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
         <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
       </div>
@@ -783,6 +847,8 @@ interface ChartDisplaySettings {
   showOrderBlocks: boolean;
   showLiquidityLevels: boolean;
   showRsi: boolean;
+  showOrb: boolean;
+  showFvg: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;
 }

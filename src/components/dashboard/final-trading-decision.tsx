@@ -17,7 +17,7 @@ type DirectionTone = "buy" | "sell" | "wait";
 export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamental, plan }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
   const tone = getSignalTone(final.signal);
-  const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL";
+  const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL" || final.signal === "ORB BREAKOUT WATCH" || final.signal === "FVG RETEST WATCH";
 
   return (
     <section className={`mt-3 overflow-hidden rounded-md border ${tone.border} bg-[#101318] shadow-[0_24px_70px_rgba(0,0,0,0.28)]`}>
@@ -49,6 +49,11 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
           <DecisionTile label="Entry zone" value={final.entryZone} />
           <DecisionTile label="Stop loss" value={final.stopLoss} />
           <DecisionTile label="TP1 / TP2" value={final.takeProfits} />
+          <DecisionTile label="FVG zone" value={final.fvgZone} />
+          <DecisionTile label="ORB status" value={final.orbStatus} />
+          <DecisionTile label="FVG confirmation" value={final.fvgStatus} />
+          <DecisionTile label="Partial TP" value={final.partialTakeProfit} />
+          <DecisionTile label="Break-even rule" value={final.breakEvenRule} />
           <DecisionTile label="Invalidation" value={final.invalidation} wide />
           <DecisionTile label="Risk level" value={final.riskLevel} tone={final.riskTone} />
         </div>
@@ -96,10 +101,12 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "STRONG SELL" || plan.direction === "Bearish";
-  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "STRONG BUY" || plan.direction === "Bullish";
+  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "STRONG SELL" || (signal !== "WAIT" && plan.direction === "Bearish");
+  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "STRONG BUY" || (signal !== "WAIT" && plan.direction === "Bullish");
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
+  const orb = activeAnalysis?.orb ?? plan.orb;
+  const fvg = activeAnalysis?.fvg ?? plan.fvg;
   const newsUnsafe = Boolean(fundamental.caution || activeAnalysis?.newsNearby);
   const trendAligned = Boolean(
     (bullish && activeAnalysis?.trend === "bullish") ||
@@ -108,12 +115,19 @@ function getFinalDecision({
   );
   const orderBlockValid = Boolean(orderBlock && orderBlock.score >= 60 && orderBlock.strength !== "ignored");
   const liquidityConfirmed = Boolean(liquidity && (liquidity.rejectionConfirmed || liquidity.realBreakoutContinuation || (liquidity.sweepDetected && activeAnalysis?.liquiditySweep)));
-  const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
+  const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || fvg?.rejectionConfirmed || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
+  const orbValid = Boolean(orb && orb.breakoutConfirmed && !orb.fakeBreakout && orb.status !== "ORB FAILED");
+  const fvgValid = Boolean(fvg && fvg.score >= 50 && fvg.fillState !== "invalid" && fvg.fillState !== "full");
+  const fvgRetested = Boolean(fvg?.touched);
+  const maSafe = !(activeAnalysis?.trendFilter ?? plan.trendFilter)?.strongAgainst;
   const checklist = [
     { label: "Trend aligned", status: statusFromBoolean(trendAligned) },
     { label: "OB valid", status: statusFromBoolean(orderBlockValid) },
     { label: "Liquidity confirmed", status: statusFromBoolean(liquidityConfirmed) },
     { label: "Rejection confirmed", status: statusFromBoolean(rejectionConfirmed) },
+    { label: "ORB breakout", status: statusFromBoolean(orbValid) },
+    { label: "FVG retest", status: statusFromBoolean(fvgValid && fvgRetested) },
+    { label: "MA safe", status: statusFromBoolean(maSafe) },
     { label: "News safe", status: newsUnsafe ? "no" : "yes" },
   ] satisfies Array<{ label: string; status: CheckStatus }>;
   const firstFailedCheck = checklist.find((item) => item.status !== "yes");
@@ -133,6 +147,11 @@ function getFinalDecision({
     entryZone,
     stopLoss: formatPrice(plan.stopLoss),
     takeProfits: `${formatPrice(plan.takeProfits[0])} / ${formatPrice(plan.takeProfits[1])}`,
+    fvgZone: fvg ? `${formatPrice(fvg.low)} - ${formatPrice(fvg.high)}` : "No valid FVG zone yet",
+    orbStatus: orb ? `${orb.status} ${orb.session} ${orb.duration}m, ${orb.confidence}/100. ${orb.missingConfirmation}` : "No London/New York ORB yet",
+    fvgStatus: fvg ? `${fvg.direction} ${formatPrice(fvg.low)}-${formatPrice(fvg.high)}, fill ${fvg.fillPercent}%, ${fvg.fillState}, score ${fvg.score}/100. ${fvg.missingConfirmation}` : "No fresh M1/M5/M15 FVG",
+    partialTakeProfit: `Take partial profit at TP1 ${formatPrice(plan.takeProfits[0])}`,
+    breakEvenRule: "After TP1 is reached, move Stop Loss to Break Even",
     invalidation: getInvalidation({ orderBlock, plan, newsUnsafe, signal }),
     riskLevel: riskLevel.label,
     riskTone: riskLevel.tone,
@@ -143,6 +162,14 @@ function getFinalDecision({
 }
 
 function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "ORB BREAKOUT WATCH") {
+    return bullish ? "WATCH BUY" : bearish ? "WATCH SELL" : "SURVEILLER";
+  }
+
+  if (signal === "FVG RETEST WATCH") {
+    return bullish ? "WATCH BUY" : bearish ? "WATCH SELL" : "SURVEILLER";
+  }
+
   if (signal === "WATCH BUY") {
     return "WATCH BUY";
   }
@@ -163,6 +190,14 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
 }
 
 function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "ORB BREAKOUT WATCH") {
+    return "Breakout detecte. Ne pas entrer: attendre la creation/retest FVG puis confirmation M1.";
+  }
+
+  if (signal === "FVG RETEST WATCH") {
+    return "Prix sur la FVG. Ne pas entrer tant que le rejet ou micro BOS/CHoCH M1 n'est pas confirme.";
+  }
+
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Setup en formation. Ne pas entrer encore: attendre la confirmation indiquee.";
   }
@@ -187,6 +222,14 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
 }
 
 function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "ORB BREAKOUT WATCH") {
+    return bullish ? "ORB BUY a surveiller" : bearish ? "ORB SELL a surveiller" : "ORB a surveiller";
+  }
+
+  if (signal === "FVG RETEST WATCH") {
+    return bullish ? "Retest FVG BUY" : bearish ? "Retest FVG SELL" : "Retest FVG";
+  }
+
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Setup a surveiller";
   }
@@ -223,6 +266,14 @@ function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boo
 }
 
 function getNextConfirmation({ missingCondition, signal }: { missingCondition: string; signal: Signal }) {
+  if (signal === "ORB BREAKOUT WATCH") {
+    return missingCondition || "Wait for same-direction FVG, then FVG retest.";
+  }
+
+  if (signal === "FVG RETEST WATCH") {
+    return missingCondition || "Wait for M1 rejection candle or micro BOS/CHoCH from the FVG.";
+  }
+
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return missingCondition;
   }
@@ -243,6 +294,10 @@ function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; b
     return "Do not enter. Wait for every checklist item to turn valid.";
   }
 
+  if (signal === "ORB BREAKOUT WATCH" || signal === "FVG RETEST WATCH") {
+    return "Watch only. No entry until FVG retest plus M1 rejection/confirmation.";
+  }
+
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Watch only. No entry until the missing confirmation appears.";
   }
@@ -259,6 +314,12 @@ function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; b
 }
 
 function getEntryZone({ activeAnalysis, orderBlock, plan }: { activeAnalysis?: TimeframeAnalysis; orderBlock: NonNullable<TradePlan["orderBlock"]> | null; plan: TradePlan }) {
+  const fvg = activeAnalysis?.fvg ?? plan.fvg;
+
+  if (fvg) {
+    return `${formatPrice(fvg.low)} - ${formatPrice(fvg.high)}`;
+  }
+
   if (orderBlock) {
     return `${formatPrice(orderBlock.low)} - ${formatPrice(orderBlock.high)}`;
   }
@@ -283,8 +344,8 @@ function getInvalidation({ orderBlock, plan, newsUnsafe, signal }: { orderBlock:
     return "Any entry is invalid until missing condition is confirmed";
   }
 
-  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
-    return "Invalid if confirmation fails or price leaves the zone before trigger";
+  if (signal === "WATCH BUY" || signal === "WATCH SELL" || signal === "ORB BREAKOUT WATCH" || signal === "FVG RETEST WATCH") {
+    return "Invalid if FVG is fully filled without rejection or price closes back inside ORB range";
   }
 
   const zoneText = orderBlock ? " or OB zone is broken cleanly" : "";
@@ -322,6 +383,14 @@ function getReason({
     return `${plan.waitReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
   }
 
+  if (signal === "ORB BREAKOUT WATCH") {
+    return `${signal} on ${activeTimeframe}: breakout is detected, but the FVG retest sequence is not complete yet.`;
+  }
+
+  if (signal === "FVG RETEST WATCH") {
+    return `${signal} on ${activeTimeframe}: price is retesting the FVG; wait for M1 rejection or micro BOS/CHoCH before entry.`;
+  }
+
   const confirmation = rejectionConfirmed ? "price-action confirmation is present" : "confirmation must remain visible before execution";
   const ob = orderBlockValid ? "a valid Order Block is mapped" : "the Order Block is not the only reason for entry";
   const news = fundamental.caution ? "USD news risk is active, so trade should be blocked" : "USD news filter is safe";
@@ -344,6 +413,16 @@ function translateMissingCondition(condition: string) {
     "Entry confirmation: rejection candle, micro BOS/CHoCH, or momentum from zone": "Wait for a rejection candle, micro BOS/CHoCH, or momentum from the zone.",
     "ATR acceptable": "Wait for ATR/volatility to become tradable.",
     "Higher timeframe is strongly opposite": "Do not scalp against a strongly opposite H1/H4 context.",
+    "ORB not failed": "Wait for a valid ORB breakout that has not failed.",
+    "FVG rejection confirmation": "Wait for FVG rejection confirmation.",
+    "Fresh or partial FVG only": "Wait for a fresh or partial FVG, not a fully filled one.",
+    "30-minute ORB range formed": "Wait until the 30-minute opening range is formed.",
+    "Candle close outside 30-minute OR high/low": "Wait for a candle close outside the 30-minute OR high or low.",
+    "FVG created after ORB breakout": "Wait for the breakout to create a same-direction FVG.",
+    "FVG retest": "Wait for price to retest the FVG zone.",
+    "M1 rejection/confirmation after FVG retest": "Wait for M1 rejection candle or micro BOS/CHoCH after the FVG retest.",
+    "MA trend not strongly against setup": "Wait until the MA bias is no longer clearly against the setup.",
+    "Spread safe": "Wait for spread to normalize before scalping.",
   };
 
   if (condition.startsWith("At least")) {
@@ -436,6 +515,14 @@ function getSignalTone(signal: Signal) {
       badge: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
       border: "border-emerald-300/20",
       header: "bg-emerald-300/10",
+    };
+  }
+
+  if (signal === "ORB BREAKOUT WATCH" || signal === "FVG RETEST WATCH") {
+    return {
+      badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100",
+      border: "border-cyan-300/20",
+      header: "bg-cyan-300/10",
     };
   }
 

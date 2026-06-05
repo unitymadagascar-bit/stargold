@@ -181,6 +181,9 @@ export function analyzeCandles(candles: Candle[]): TechnicalAnalysis {
     orderBlock: detectOrderBlock({ candles }),
     liquidity,
     fvg: last && previous && Math.abs(last.low - previous.high) > atr * 0.25 ? { low: previous.high, high: last.low } : null,
+    fvgAnalysis: null,
+    orb: null,
+    trendFilter: null,
     displacement,
   };
 }

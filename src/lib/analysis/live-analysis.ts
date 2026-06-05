@@ -3,7 +3,9 @@ import type {
   Direction,
   FundamentalContext,
   MacroContext,
+  MovingAverageType,
   NewsEvent,
+  OrbDuration,
   ScalpingSensitivity,
   Signal,
   SignalMode,
@@ -12,14 +14,18 @@ import type {
   TimeframeAnalysis,
   TradePlan,
   Trend,
+  TrendFilterAnalysis,
 } from "@/types";
 import { analyzeCandles } from "@/lib/analysis/market-structure";
 import { detectLiquidityAnalysis } from "@/lib/analysis/liquidity";
+import { detectFvgAnalysis, fvgDirectionMatches } from "@/lib/analysis/fvg";
 import { detectOrderBlock } from "@/lib/analysis/order-blocks";
+import { detectOrbAnalysis } from "@/lib/analysis/orb";
 import { timeframes } from "@/lib/market/timeframes";
 import { calculateRiskReward, calculateLotSize } from "@/lib/risk/risk";
 import { generateFinalDecision, inferDirection } from "@/lib/scoring/confluence";
 import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDecisionStrength, hasRequiredTechnicalConfirmation } from "@/lib/fundamentals/decision-score";
+import { calculateEMA, calculateSMA, lastValue } from "@/lib/indicators";
 
 const MIN_ANALYSIS_CANDLES = 30;
 const SCALPING_TIMEFRAMES: Timeframe[] = ["M1", "M5", "M15"];
@@ -27,8 +33,8 @@ const sensitivityProfiles: Record<
   ScalpingSensitivity,
   { minConditions: number; minRiskReward: number; readyThreshold: number; watchThreshold: number }
 > = {
-  safe: { minConditions: 4, minRiskReward: 1.2, readyThreshold: 60, watchThreshold: 52 },
-  balanced: { minConditions: 3, minRiskReward: 1.1, readyThreshold: 58, watchThreshold: 50 },
+  safe: { minConditions: 4, minRiskReward: 1.0, readyThreshold: 60, watchThreshold: 52 },
+  balanced: { minConditions: 3, minRiskReward: 1.0, readyThreshold: 58, watchThreshold: 50 },
   aggressive: { minConditions: 3, minRiskReward: 1.0, readyThreshold: 58, watchThreshold: 48 },
 };
 
@@ -61,15 +67,25 @@ export function buildLiveTimeframeAnalyses({
   fundamental,
   macro,
   mode = "conservative",
+  movingAveragePeriod = 50,
+  movingAverageType = "EMA",
   news,
+  orbDuration = 30,
+  orbRequireRetest = false,
   scalpingSensitivity = "balanced",
+  spread = null,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
   macro: MacroContext;
   mode?: SignalMode;
+  movingAveragePeriod?: number;
+  movingAverageType?: MovingAverageType;
   news: NewsEvent[];
+  orbDuration?: OrbDuration;
+  orbRequireRetest?: boolean;
   scalpingSensitivity?: ScalpingSensitivity;
+  spread?: number | null;
 }): TimeframeAnalysis[] {
   void macro;
   const higherTimeframe = getHigherTimeframeContext(candleMap);
@@ -88,7 +104,7 @@ export function buildLiveTimeframeAnalyses({
     const stopLoss = getStopLoss(direction, price, baseAnalysis.support, baseAnalysis.resistance, baseAnalysis.atr);
     const target = direction === "Bearish" ? price - Math.abs(price - stopLoss) * 2 : price + Math.abs(price - stopLoss) * 2;
     const riskReward = calculateRiskReward(price, stopLoss, target);
-    const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, newsRisk: redNewsNearby, riskReward });
+    const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe });
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
     const decision = evaluateSignal({
       analysis,
@@ -125,6 +141,9 @@ export function buildLiveTimeframeAnalyses({
       newsNearby: redNewsNearby,
       orderBlock: analysis.orderBlock,
       liquidity: analysis.liquidity,
+      fvg: analysis.fvgAnalysis,
+      orb: analysis.orb,
+      trendFilter: analysis.trendFilter,
       riskReward: Number(riskReward.toFixed(2)),
       summary: `${decision.waitReason}. ${decision.missingConditions.length ? `Missing: ${decision.missingConditions.join(", ")}.` : "Conditions validees."}`,
     };
@@ -136,17 +155,27 @@ export function buildLiveTradePlan({
   fundamental,
   macro,
   mode = "conservative",
+  movingAveragePeriod = 50,
+  movingAverageType = "EMA",
   news,
+  orbDuration = 30,
+  orbRequireRetest = false,
   preferredTimeframe,
   scalpingSensitivity = "balanced",
+  spread = null,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
   macro: MacroContext;
   mode?: SignalMode;
+  movingAveragePeriod?: number;
+  movingAverageType?: MovingAverageType;
   news: NewsEvent[];
+  orbDuration?: OrbDuration;
+  orbRequireRetest?: boolean;
   preferredTimeframe?: Timeframe;
   scalpingSensitivity?: ScalpingSensitivity;
+  spread?: number | null;
 }): TradePlan {
   void macro;
   const analysisTimeframe = getPlanTimeframe(candleMap, mode, preferredTimeframe);
@@ -172,6 +201,9 @@ export function buildLiveTradePlan({
       scoring: { technical: 0, orderFlow: 0, fundamental: 0, risk: 0, total: 0 },
       orderBlock: null,
       liquidity: null,
+      fvg: null,
+      orb: null,
+      trendFilter: null,
     };
   }
 
@@ -183,7 +215,7 @@ export function buildLiveTradePlan({
   const takeProfits = getTakeProfits(direction, price, Math.abs(price - stopLoss));
   const riskReward = calculateRiskReward(price, stopLoss, takeProfits[0]);
   const redNewsNearby = hasRedNewsRisk({ fundamental, news });
-  const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, newsRisk: redNewsNearby, riskReward });
+  const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe: analysisTimeframe });
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
   const decision = evaluateSignal({
     analysis,
@@ -199,33 +231,48 @@ export function buildLiveTradePlan({
     scalpingSensitivity,
     timeframe: analysisTimeframe,
   });
+  const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
+  const fvgPlan = analysis.fvgAnalysis;
+  const planDirection = orbPlan?.direction ?? direction;
+  const plannedEntry = getPlannedEntry({ fvg: fvgPlan, orb: orbPlan, price });
+  const plannedStopLoss = round(orbPlan ? orbPlan.stopLoss : stopLoss);
+  const plannedTakeProfits = getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
+  const plannedRiskReward = plannedEntry && plannedStopLoss ? calculateRiskReward(plannedEntry, plannedStopLoss, plannedTakeProfits[0]) : riskReward;
+  const plannedStopDistance = Math.abs(plannedEntry - plannedStopLoss);
 
   return {
-    direction,
+    direction: planDirection,
     decision: decision.signal,
     signalMode: mode,
     scalpingSensitivity,
     waitReason: decision.waitReason,
     missingConditions: decision.missingConditions,
     score: decision.confidence,
-    summary: `${summarizeDecision(decision.signal, direction, mode)} ${decision.waitReason}. ${describeOrderBlock(analysis)} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
-    entry: round(price),
-    stopLoss: round(stopLoss),
-    takeProfits: takeProfits.map(round) as [number, number, number],
-    riskReward: Number(riskReward.toFixed(2)),
-    lotSize: calculateLotSize({ capital: 10000, riskPercent: 1, stopLossDistance: Math.abs(price - stopLoss), pipValue: 10 }),
+    summary: `${summarizeDecision(decision.signal, direction, mode)} ${decision.waitReason}. ${describeOrderBlock(analysis)} ${describeOrbFvg(analysis)} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
+    entry: round(plannedEntry),
+    stopLoss: plannedStopLoss,
+    takeProfits: plannedTakeProfits,
+    riskReward: Number(plannedRiskReward.toFixed(2)),
+    lotSize: calculateLotSize({ capital: 10000, riskPercent: 1, stopLossDistance: plannedStopDistance, pipValue: 10 }),
     alerts: [
       decision.waitReason,
       ...decision.missingConditions.map((condition) => `Missing before signal: ${condition}`),
+      "TP1 default is RR 1:1; take partial profit at TP1.",
+      "After TP1 is reached, move Stop Loss to Break Even.",
       mode === "scalping" ? "Scalping has higher risk and requires strict stop loss." : "Conservative mode requires stronger confirmation.",
       analysis.liquiditySweep ? "Liquidity sweep detecte sur les bougies live." : "Pas de sweep confirme pour l'instant.",
       describeOrderBlock(analysis),
+      analysis.orb ? `${analysis.orb.status}: ${analysis.orb.missingConfirmation}` : "ORB: waiting for London/New York opening range.",
+      analysis.fvgAnalysis ? `FVG ${analysis.fvgAnalysis.direction} ${analysis.fvgAnalysis.score}/100, fill ${analysis.fvgAnalysis.fillPercent}%: ${analysis.fvgAnalysis.missingConfirmation}` : "No fresh M1/M5/M15 FVG confirmation.",
       "Order Block is an analysis zone, not a guaranteed entry.",
       fundamental.usdInterpretation,
     ],
     scoring,
     orderBlock: analysis.orderBlock,
     liquidity: analysis.liquidity,
+    fvg: analysis.fvgAnalysis,
+    orb: analysis.orb,
+    trendFilter: analysis.trendFilter,
   };
 }
 
@@ -311,7 +358,7 @@ function evaluateConservativeSignal({
 function evaluateScalpingSignal({
   analysis,
   candles,
-  direction,
+  direction: fallbackDirection,
   higherTimeframe,
   redNewsNearby,
   riskReward,
@@ -336,84 +383,129 @@ function evaluateScalpingSignal({
     };
   }
 
-  const micro = evaluateMicroStructure(candles, analysis, direction);
+  const orb = analysis.orb;
+  const fvg = analysis.fvgAnalysis;
+  const setupDirection = orb?.direction && orb.direction !== "Neutral" ? orb.direction : fallbackDirection;
+  const micro = evaluateMicroStructure(candles, analysis, setupDirection);
   const profile = sensitivityProfiles[scalpingSensitivity];
-  const higherTimeframeConflict = isHigherTimeframeConflict(micro.direction, higherTimeframe);
-  const setupConditions = [
-    micro.sweep ? "liquidity sweep" : null,
-    micro.obZoneNearby ? "OB zone nearby" : null,
-    micro.microBos ? "micro BOS/CHoCH" : null,
-    micro.rejection ? "rejection candle" : null,
-    micro.momentum ? "momentum" : null,
-    micro.atrOk ? "ATR acceptable" : null,
-    micro.supportResistanceNearby ? "price near support/resistance" : null,
+  const higherTimeframeConflict = isHigherTimeframeConflict(setupDirection, higherTimeframe);
+  const strongMaConflict = Boolean(analysis.trendFilter?.strongAgainst);
+  const spreadOk = orb?.spreadOk ?? true;
+  const atrOk = orb?.atrOk ?? micro.atrOk;
+  const readyConfirmation = fvg?.rejectionConfirmed || micro.rejection || micro.microBos || (micro.momentum && fvg?.touched);
+  const fvgMatches = Boolean(fvg && fvgDirectionMatches(fvg.direction, setupDirection));
+  const fvgFreshEnough = Boolean(fvg && fvg.fillState !== "invalid" && fvg.fillState !== "full");
+  const confidence = clamp(
+    (orb?.confidence ?? 0) * 0.42 +
+      (fvg?.score ?? 0) * 0.36 +
+      (fvg?.touched ? 7 : 0) +
+      (readyConfirmation ? 13 : 0) +
+      (micro.momentum ? 5 : 0) +
+      (analysis.trendFilter?.bias === setupDirection ? 4 : 0) -
+      (strongMaConflict ? 18 : 0),
+    100,
+  );
+  const baseMissing = [
+    redNewsNearby ? "No red USD news risk" : null,
+    higherTimeframeConflict ? "Higher timeframe is strongly opposite" : null,
+    strongMaConflict ? "MA trend not strongly against setup" : null,
+    spreadOk ? null : "Spread safe",
+    atrOk ? null : "ATR acceptable",
+    riskReward >= profile.minRiskReward ? null : `Risk/reward >= 1:${profile.minRiskReward.toFixed(1)}`,
   ].filter(Boolean) as string[];
-  const readyConfirmation = micro.microBos || micro.rejection || (micro.momentum && (micro.sweep || micro.obZoneNearby || micro.supportResistanceNearby));
-  const missingConditions = getScalpingMissingConditions({
-    higherTimeframeConflict,
-    micro,
-    minConditions: profile.minConditions,
-    minRiskReward: profile.minRiskReward,
-    readyConfirmation,
-    redNewsNearby,
-    riskReward,
-    setupConditions,
-    watchThreshold: profile.watchThreshold,
-  });
 
   if (redNewsNearby) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: news risk", missingConditions };
+    return { signal: "WAIT", confidence, waitReason: "WAIT: red USD news risk", missingConditions: baseMissing };
   }
 
   if (analysis.volatility === "trop dangereuse") {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: volatility danger zone", missingConditions: ["Volatility below danger zone"] };
+    return { signal: "WAIT", confidence, waitReason: "WAIT: volatility danger zone", missingConditions: ["Volatility below danger zone", ...baseMissing] };
   }
 
   if (higherTimeframeConflict) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: higher timeframe strongly opposite", missingConditions };
+    return { signal: "WAIT", confidence, waitReason: "WAIT: higher timeframe strongly opposite", missingConditions: baseMissing };
   }
 
-  if (micro.direction === "Neutral" || setupConditions.length < profile.minConditions || micro.confidence < profile.watchThreshold) {
-    return { signal: "WAIT", confidence: micro.confidence, waitReason: getScalpingWaitReason(missingConditions), missingConditions };
+  if (strongMaConflict) {
+    return { signal: "WAIT", confidence, waitReason: "WAIT: MA trend clearly against setup", missingConditions: baseMissing };
   }
 
-  if (micro.confidence >= 75 && readyConfirmation && riskReward >= profile.minRiskReward) {
+  if (!orb) {
+    return { signal: "WAIT", confidence: 0, waitReason: "WAIT: no 30-minute ORB session range yet", missingConditions: ["30-minute ORB range formed", ...baseMissing] };
+  }
+
+  if (orb.status === "FORMING" || orb.direction === "Neutral") {
     return {
-      signal: micro.direction === "Bullish" ? "STRONG BUY" : "STRONG SELL",
-      confidence: micro.confidence,
-      waitReason: `${micro.direction === "Bullish" ? "STRONG BUY" : "STRONG SELL"}: scalp setup has strong confirmation`,
+      signal: "WAIT",
+      confidence: orb.confidence,
+      waitReason: "WAIT: opening range formed, no close outside high/low yet",
+      missingConditions: ["Candle close outside 30-minute OR high/low", ...baseMissing],
+    };
+  }
+
+  if (orb.status === "ORB FAILED" || orb.fakeBreakout) {
+    return { signal: "WAIT", confidence, waitReason: "WAIT: ORB failed/fake breakout", missingConditions: ["ORB not failed", ...baseMissing] };
+  }
+
+  if (!spreadOk) {
+    return { signal: "WAIT", confidence, waitReason: "WAIT: spread too wide for scalp", missingConditions: baseMissing };
+  }
+
+  if (!fvgMatches) {
+    return {
+      signal: "ORB BREAKOUT WATCH",
+      confidence,
+      waitReason: "ORB BREAKOUT WATCH: breakout happened, waiting for a same-direction FVG",
+      missingConditions: ["FVG created after ORB breakout", ...baseMissing],
+    };
+  }
+
+  if (!fvgFreshEnough && !fvg?.rejectionConfirmed) {
+    return { signal: "WAIT", confidence, waitReason: "WAIT: FVG fully filled without rejection", missingConditions: ["Fresh or partial FVG only", ...baseMissing] };
+  }
+
+  if (!fvg?.touched) {
+    return {
+      signal: "ORB BREAKOUT WATCH",
+      confidence,
+      waitReason: "ORB BREAKOUT WATCH: valid breakout created FVG, wait for FVG retest",
+      missingConditions: ["FVG retest", ...baseMissing],
+    };
+  }
+
+  if (!readyConfirmation) {
+    return {
+      signal: "FVG RETEST WATCH",
+      confidence,
+      waitReason: "FVG RETEST WATCH: price retests FVG, waiting for M1 rejection/confirmation",
+      missingConditions: ["M1 rejection/confirmation after FVG retest", ...baseMissing],
+    };
+  }
+
+  if (confidence < profile.readyThreshold) {
+    return {
+      signal: "FVG RETEST WATCH",
+      confidence,
+      waitReason: "FVG RETEST WATCH: confirmation exists but confidence is still below SCALP READY",
+      missingConditions: [`Confidence >= ${profile.readyThreshold}% for SCALP READY`, ...baseMissing],
+    };
+  }
+
+  if (confidence >= 75) {
+    return {
+      signal: setupDirection === "Bullish" ? "STRONG BUY" : "STRONG SELL",
+      confidence,
+      waitReason: `${setupDirection === "Bullish" ? "STRONG BUY" : "STRONG SELL"}: ORB breakout, FVG retest and M1 confirmation aligned`,
       missingConditions: [],
     };
   }
 
-  if (micro.confidence >= profile.readyThreshold && readyConfirmation && riskReward >= profile.minRiskReward) {
-    return {
-      signal: micro.direction === "Bullish" ? "BUY SCALP READY" : "SELL SCALP READY",
-      confidence: micro.confidence,
-      waitReason: `${micro.direction === "Bullish" ? "BUY" : "SELL"} SCALP READY: wait for the next short trigger candle before entry`,
-      missingConditions: [],
-    };
-  }
-
-  if (micro.direction === "Bullish") {
-    return {
-      signal: "WATCH BUY",
-      confidence: micro.confidence,
-      waitReason: "WATCH BUY: setup forming, confirmation still needed",
-      missingConditions,
-    };
-  }
-
-  if (micro.direction === "Bearish") {
-    return {
-      signal: "WATCH SELL",
-      confidence: micro.confidence,
-      waitReason: "WATCH SELL: setup forming, confirmation still needed",
-      missingConditions,
-    };
-  }
-
-  return { signal: "WAIT", confidence: micro.confidence, waitReason: "WAIT: no momentum", missingConditions };
+  return {
+    signal: setupDirection === "Bullish" ? "BUY SCALP READY" : "SELL SCALP READY",
+    confidence,
+    waitReason: `${setupDirection === "Bullish" ? "BUY" : "SELL"} SCALP READY: FVG retest plus M1 confirmation detected`,
+    missingConditions: [],
+  };
 }
 
 function evaluateMicroStructure(candles: Candle[], analysis: TechnicalAnalysis, fallbackDirection: Direction) {
@@ -477,23 +569,139 @@ function evaluateMicroStructure(candles: Candle[], analysis: TechnicalAnalysis, 
   return { atrOk, confidence, direction, microBos, momentum, obZoneNearby, rejection, supportResistanceNearby, sweep, zoneOk };
 }
 
+function getPlannedEntry({
+  fvg,
+  orb,
+  price,
+}: {
+  fvg: TechnicalAnalysis["fvgAnalysis"];
+  orb: TechnicalAnalysis["orb"];
+  price: number;
+}) {
+  if (fvg && orb?.direction === "Bullish") {
+    return fvg.high;
+  }
+
+  if (fvg && orb?.direction === "Bearish") {
+    return fvg.low;
+  }
+
+  if (orb?.direction === "Bullish") {
+    return orb.entryZone.low;
+  }
+
+  if (orb?.direction === "Bearish") {
+    return orb.entryZone.high;
+  }
+
+  return price;
+}
+
+function getPlannedTakeProfits({
+  direction,
+  fallbackTakeProfits,
+  orb,
+  resistance,
+  support,
+}: {
+  direction: Direction;
+  fallbackTakeProfits: [number, number, number];
+  orb: TechnicalAnalysis["orb"];
+  resistance: number;
+  support: number;
+}) {
+  if (!orb || direction === "Neutral") {
+    return fallbackTakeProfits.map(round) as [number, number, number];
+  }
+
+  const tp1 = orb.takeProfits[0];
+  const rrTwo = orb.takeProfits[1];
+  const liquidityTarget =
+    direction === "Bullish" && resistance > tp1
+      ? resistance
+      : direction === "Bearish" && support > 0 && support < tp1
+        ? support
+        : rrTwo;
+  const tp2 = direction === "Bullish" ? Math.max(rrTwo, liquidityTarget) : Math.min(rrTwo, liquidityTarget);
+
+  return [tp1, tp2, tp2].map(round) as [number, number, number];
+}
+
 function withOrderBlock({
   analysis,
   candles,
   higherTimeframeTrend,
+  movingAveragePeriod,
+  movingAverageType,
   newsRisk,
+  orbDuration,
+  orbRequireRetest,
   riskReward,
+  spread,
+  timeframe,
 }: {
   analysis: TechnicalAnalysis;
   candles: Candle[];
   higherTimeframeTrend: Trend;
+  movingAveragePeriod: number;
+  movingAverageType: MovingAverageType;
   newsRisk: boolean;
+  orbDuration: OrbDuration;
+  orbRequireRetest: boolean;
   riskReward: number;
+  spread: number | null;
+  timeframe: Timeframe;
 }): TechnicalAnalysis {
+  const orb = ["M1", "M5", "M15"].includes(timeframe)
+    ? detectOrbAnalysis({ atr: analysis.atr, candles, duration: orbDuration, newsSafe: !newsRisk, requireRetest: orbRequireRetest, spread })
+    : null;
+  const orbDirection = orb?.direction && orb.direction !== "Neutral" ? orb.direction : inferDirection(analysis);
+  const fvgDirection = orbDirection === "Bullish" ? "bullish" : orbDirection === "Bearish" ? "bearish" : null;
+  const fvgAnalysis = detectFvgAnalysis(candles, timeframe, { afterTime: orb?.breakoutTime, direction: fvgDirection });
+  const trendFilter = detectTrendFilter({ candles, direction: orbDirection, movingAveragePeriod, movingAverageType });
+
   return {
     ...analysis,
     orderBlock: detectOrderBlock({ candles, higherTimeframeTrend, riskReward }),
     liquidity: detectLiquidityAnalysis(candles, newsRisk),
+    fvgAnalysis,
+    orb,
+    trendFilter,
+  };
+}
+
+function detectTrendFilter({
+  candles,
+  direction,
+  movingAveragePeriod,
+  movingAverageType,
+}: {
+  candles: Candle[];
+  direction: Direction;
+  movingAveragePeriod: number;
+  movingAverageType: MovingAverageType;
+}): TrendFilterAnalysis | null {
+  const closes = candles.map((candle) => candle.close).filter((value) => Number.isFinite(value));
+  const period = Math.max(5, Math.min(300, Math.round(movingAveragePeriod)));
+
+  if (closes.length < Math.min(period, 20)) {
+    return null;
+  }
+
+  const averageValues = movingAverageType === "SMA" ? calculateSMA(closes, period) : calculateEMA(closes, period);
+  const value = lastValue(averageValues, closes.at(-1) ?? 0);
+  const price = closes.at(-1) ?? value;
+  const bias: Direction = price > value ? "Bullish" : price < value ? "Bearish" : "Neutral";
+  const distancePercent = price > 0 ? Math.abs(price - value) / price * 100 : 0;
+  const strongAgainst = direction !== "Neutral" && bias !== "Neutral" && bias !== direction && distancePercent >= 0.18;
+
+  return {
+    bias,
+    distancePercent: Number(distancePercent.toFixed(2)),
+    period,
+    strongAgainst,
+    type: movingAverageType,
+    value: round(value),
   };
 }
 
@@ -686,6 +894,10 @@ function isPriceNearSupportResistance({ analysis, price }: { analysis: Technical
   return Math.abs(price - analysis.support) <= atrDistance || Math.abs(price - analysis.resistance) <= atrDistance;
 }
 
+function zonesOverlap(firstLow: number, firstHigh: number, secondLow: number, secondHigh: number) {
+  return firstHigh >= secondLow && firstLow <= secondHigh;
+}
+
 function hasRedNewsRisk({ fundamental, news }: { fundamental: FundamentalContext; news: NewsEvent[] }) {
   return fundamental.caution || news.some((event) => event.impact === "high" && event.minutesAway <= 30);
 }
@@ -732,6 +944,17 @@ function describeOrderBlock(analysis: TechnicalAnalysis) {
     : "confirmation price action requise";
 
   return `${label} ${orderBlock.strength} ${orderBlock.score}/100, ${touch}, ${confirmation}.`;
+}
+
+function describeOrbFvg(analysis: TechnicalAnalysis) {
+  const orb = analysis.orb
+    ? `${analysis.orb.status} ${analysis.orb.session} ORB ${analysis.orb.duration}m (${analysis.orb.confidence}/100): ${analysis.orb.missingConfirmation}`
+    : "ORB en attente.";
+  const fvg = analysis.fvgAnalysis
+    ? `FVG ${analysis.fvgAnalysis.direction} ${analysis.fvgAnalysis.score}/100, fill ${analysis.fvgAnalysis.fillPercent}%, ${analysis.fvgAnalysis.fillState}: ${analysis.fvgAnalysis.missingConfirmation}`
+    : "Aucun FVG frais M1/M5/M15.";
+
+  return `${orb} ${fvg}`;
 }
 
 function getStopLoss(direction: Direction, price: number, support: number, resistance: number, fallbackDistance: number) {
@@ -817,6 +1040,9 @@ function emptyTimeframeAnalysis({
     newsNearby,
     orderBlock: null,
     liquidity: null,
+    fvg: null,
+    orb: null,
+    trendFilter: null,
     riskReward: 0,
     summary: waitReason,
   };

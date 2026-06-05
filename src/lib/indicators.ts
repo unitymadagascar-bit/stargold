@@ -15,6 +15,17 @@ export function calculateEMA(values: number[], period: number): number[] {
   return ema;
 }
 
+export function calculateSMA(values: number[], period: number): number[] {
+  if (!values.length) {
+    return [];
+  }
+
+  return values.map((_, index) => {
+    const slice = values.slice(Math.max(0, index - period + 1), index + 1);
+    return slice.reduce((sum, value) => sum + value, 0) / slice.length;
+  });
+}
+
 export function calculateRSI(values: number[], period = 14): number {
   if (values.length <= period) {
     return 50;

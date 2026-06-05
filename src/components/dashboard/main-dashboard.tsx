@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Gauge, ShieldCheck, Target, Wifi, WifiOff, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -24,13 +24,18 @@ export function MainDashboard() {
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
   const [scalpingSensitivity, setScalpingSensitivity] = useState<ScalpingSensitivity>("balanced");
+  const [orbDuration, setOrbDuration] = useState<OrbDuration>(30);
+  const [orbRequireRetest, setOrbRequireRetest] = useState(false);
+  const [movingAverageType, setMovingAverageType] = useState<MovingAverageType>("EMA");
+  const [movingAveragePeriod, setMovingAveragePeriod] = useState(50);
+  const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, scalpingSensitivity }),
-    [fundamentals.fundamental, live.candleMap, scalpingSensitivity, signalMode],
+    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread }),
+    [fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, news: newsEvents, preferredTimeframe: activeTimeframe, scalpingSensitivity }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, scalpingSensitivity, signalMode],
+    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -39,7 +44,6 @@ export function MainDashboard() {
   const previousCandle = activeCandles.at(-2) ?? null;
   const priceChange = latestCandle && previousCandle ? latestCandle.close - previousCandle.close : 0;
   const priceChangePercent = previousCandle?.close ? (priceChange / previousCandle.close) * 100 : 0;
-  const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const handleSignalModeChange = (mode: SignalMode) => {
     setSignalMode(mode);
     if (mode === "scalping" && activeTimeframe !== "M1" && activeTimeframe !== "M5") {
@@ -80,6 +84,8 @@ export function MainDashboard() {
             connectionStatus={live.status}
             lastTick={live.lastTick}
             orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock}
+            fvg={activeAnalysis?.fvg ?? plan.fvg}
+            orb={activeAnalysis?.orb ?? plan.orb}
             plan={plan}
             timeframe={activeTimeframe}
             onTimeframeChange={setActiveTimeframe}
@@ -113,7 +119,22 @@ export function MainDashboard() {
         </div>
 
         <aside className="space-y-3">
-          <SignalModePanel activeAnalysis={activeAnalysis} mode={signalMode} onModeChange={handleSignalModeChange} onSensitivityChange={setScalpingSensitivity} plan={plan} sensitivity={scalpingSensitivity} />
+          <SignalModePanel
+            activeAnalysis={activeAnalysis}
+            mode={signalMode}
+            movingAveragePeriod={movingAveragePeriod}
+            movingAverageType={movingAverageType}
+            onModeChange={handleSignalModeChange}
+            onMovingAveragePeriodChange={setMovingAveragePeriod}
+            onMovingAverageTypeChange={setMovingAverageType}
+            onOrbDurationChange={setOrbDuration}
+            onOrbRequireRetestChange={setOrbRequireRetest}
+            onSensitivityChange={setScalpingSensitivity}
+            orbDuration={orbDuration}
+            orbRequireRetest={orbRequireRetest}
+            plan={plan}
+            sensitivity={scalpingSensitivity}
+          />
           <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
           <TradeChecklist />
           <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
@@ -215,8 +236,8 @@ function MarketSummary({
   priceChange: number;
   priceChangePercent: number;
 }) {
-  const bearish = plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG SELL";
-  const bullish = plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "STRONG BUY";
+  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG SELL");
+  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "STRONG BUY");
   const scoreColor = bullish ? "#22c55e" : bearish ? "#ff333d" : "#f59e0b";
 
   return (
@@ -258,7 +279,7 @@ function MarketSummary({
             <p className={`text-xs font-semibold uppercase tracking-[0.14em] ${bearish ? "text-[#ff333d]" : bullish ? "text-emerald-300" : "text-amber-200"}`}>
               {plan.score >= 75 ? "Signal fort" : plan.score >= 60 ? "Signal moyen" : "Signal faible"}
             </p>
-            <p className="mt-1 text-xl font-black uppercase text-white">{plan.direction}</p>
+            <p className="mt-1 text-xl font-black uppercase text-white">{plan.decision === "WAIT" ? "Neutral" : plan.direction}</p>
             <p className="mt-1 max-w-44 text-xs leading-5 text-slate-500">Probabilite, pas une garantie.</p>
             <div className="mt-3">
               <SignalBadge signal={plan.decision} />
@@ -357,6 +378,9 @@ function SetupPanel({ activeAnalysis, activeTimeframe, candleCount, plan }: { ac
         <SetupMetric label="ATR" value={(activeAnalysis?.atr ?? 0).toFixed(2)} />
         <SetupMetric label="Sweep" value={activeAnalysis?.liquiditySweep ? "confirme" : "attente"} />
         <SetupMetric label="Retest" value={activeAnalysis?.retestConfirmed ? "confirme" : "attente"} />
+        <SetupMetric label="ORB" value={activeAnalysis?.orb?.status ?? plan.orb?.status ?? "WAIT"} />
+        <SetupMetric label="FVG" value={activeAnalysis?.fvg ? `${activeAnalysis.fvg.fillPercent}% fill` : plan.fvg ? `${plan.fvg.fillPercent}% fill` : "attente"} />
+        <SetupMetric label="MA bias" value={activeAnalysis?.trendFilter ? `${activeAnalysis.trendFilter.type}${activeAnalysis.trendFilter.period} ${activeAnalysis.trendFilter.bias}` : plan.trendFilter ? `${plan.trendFilter.type}${plan.trendFilter.period} ${plan.trendFilter.bias}` : "attente"} />
       </div>
     </section>
   );
@@ -365,20 +389,39 @@ function SetupPanel({ activeAnalysis, activeTimeframe, candleCount, plan }: { ac
 function SignalModePanel({
   activeAnalysis,
   mode,
+  movingAveragePeriod,
+  movingAverageType,
   onModeChange,
+  onMovingAveragePeriodChange,
+  onMovingAverageTypeChange,
+  onOrbDurationChange,
+  onOrbRequireRetestChange,
   onSensitivityChange,
+  orbDuration,
+  orbRequireRetest,
   plan,
   sensitivity,
 }: {
   activeAnalysis?: TimeframeAnalysis;
   mode: SignalMode;
+  movingAveragePeriod: number;
+  movingAverageType: MovingAverageType;
   onModeChange: (mode: SignalMode) => void;
+  onMovingAveragePeriodChange: (period: number) => void;
+  onMovingAverageTypeChange: (type: MovingAverageType) => void;
+  onOrbDurationChange: (duration: OrbDuration) => void;
+  onOrbRequireRetestChange: (enabled: boolean) => void;
   onSensitivityChange: (sensitivity: ScalpingSensitivity) => void;
+  orbDuration: OrbDuration;
+  orbRequireRetest: boolean;
   plan: TradePlan;
   sensitivity: ScalpingSensitivity;
 }) {
-  const scalpActive = plan.decision === "WATCH BUY" || plan.decision === "WATCH SELL" || plan.decision === "BUY SCALP READY" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG BUY" || plan.decision === "STRONG SELL";
+  const scalpActive = plan.decision === "WATCH BUY" || plan.decision === "WATCH SELL" || plan.decision === "ORB BREAKOUT WATCH" || plan.decision === "FVG RETEST WATCH" || plan.decision === "BUY SCALP READY" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG BUY" || plan.decision === "STRONG SELL";
   const missing = activeAnalysis?.missingConditions ?? plan.missingConditions;
+  const orb = activeAnalysis?.orb ?? plan.orb;
+  const fvg = activeAnalysis?.fvg ?? plan.fvg;
+  const trendFilter = activeAnalysis?.trendFilter ?? plan.trendFilter;
 
   return (
     <section className="rounded-md border border-white/10 bg-[#171717] p-3">
@@ -398,6 +441,9 @@ function SignalModePanel({
         <SetupMetric label="Seuils" value="WATCH 50 / READY 58" />
         <SetupMetric label="Priorite" value="M1 / M5 puis M15" />
         <SetupMetric label="Sensibilite" value={formatSensitivity(sensitivity)} />
+        <SetupMetric label="ORB status" value={orb?.status ?? "WAIT"} />
+        <SetupMetric label="FVG" value={fvg ? `${fvg.direction} ${fvg.score}/100` : "attente"} />
+        <SetupMetric label="MA bias" value={trendFilter ? `${trendFilter.type}${trendFilter.period} ${trendFilter.bias}` : `${movingAverageType}${movingAveragePeriod}`} />
       </div>
       <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-2">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Scalping sensitivity</p>
@@ -407,8 +453,37 @@ function SignalModePanel({
           <SensitivityButton active={sensitivity === "aggressive"} label="Aggressive" onClick={() => onSensitivityChange("aggressive")} />
         </div>
       </div>
+      <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Opening Range Breakout</p>
+        <div className="grid grid-cols-3 gap-1">
+          {[5, 15, 30].map((duration) => (
+            <SensitivityButton key={duration} active={orbDuration === duration} label={`${duration} min`} onClick={() => onOrbDurationChange(duration as OrbDuration)} />
+          ))}
+        </div>
+        <label className="mt-2 flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 text-xs text-slate-300 transition hover:bg-white/[0.04]">
+          <input className="size-4 accent-amber-300" type="checkbox" checked={orbRequireRetest} onChange={(event) => onOrbRequireRetestChange(event.target.checked)} />
+          Require ORB retest confirmation
+        </label>
+      </div>
+      <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Trend MA filter</p>
+        <div className="grid grid-cols-2 gap-1">
+          <SensitivityButton active={movingAverageType === "EMA"} label="EMA" onClick={() => onMovingAverageTypeChange("EMA")} />
+          <SensitivityButton active={movingAverageType === "SMA"} label="SMA" onClick={() => onMovingAverageTypeChange("SMA")} />
+        </div>
+        <div className="mt-1 grid grid-cols-2 gap-1">
+          <SensitivityButton active={movingAveragePeriod === 50} label="50" onClick={() => onMovingAveragePeriodChange(50)} />
+          <SensitivityButton active={movingAveragePeriod === 200} label="200" onClick={() => onMovingAveragePeriodChange(200)} />
+        </div>
+        <p className="mt-2 text-xs leading-5 text-slate-400">
+          MA is a bias filter only. It blocks only when price is clearly against a strong trend.
+        </p>
+      </div>
       <p className="mt-3 rounded border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
         Scalping has higher risk and requires strict stop loss.
+      </p>
+      <p className="mt-2 rounded border border-emerald-300/10 bg-emerald-300/5 px-3 py-2 text-xs leading-5 text-slate-300">
+        ORB/FVG: {orb ? `${orb.status} (${orb.confidence}/100) - ${orb.missingConfirmation}` : "waiting London/New York range"} - {fvg ? `FVG ${fvg.fillState} fill ${fvg.fillPercent}% - ${fvg.missingConfirmation}` : "no fresh FVG"}
       </p>
       <p className="mt-2 rounded border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
         {mode === "scalping"

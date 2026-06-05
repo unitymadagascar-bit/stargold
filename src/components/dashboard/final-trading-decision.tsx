@@ -49,9 +49,14 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
           <DecisionTile label="Entry zone" value={final.entryZone} />
           <DecisionTile label="Stop loss" value={final.stopLoss} />
           <DecisionTile label="TP1 / TP2" value={final.takeProfits} />
+          <DecisionTile label="ORB high / low" value={final.orbRange} />
           <DecisionTile label="FVG zone" value={final.fvgZone} />
           <DecisionTile label="ORB status" value={final.orbStatus} />
-          <DecisionTile label="FVG confirmation" value={final.fvgStatus} />
+          <DecisionTile label="FVG status" value={final.fvgStatus} />
+          <DecisionTile label="Retest status" value={final.retestStatus} />
+          <DecisionTile label="M1 confirmation" value={final.m1ConfirmationStatus} />
+          <DecisionTile label="MA trend bias" value={final.maStatus} />
+          <DecisionTile label="Spread / news" value={final.safetyStatus} />
           <DecisionTile label="Partial TP" value={final.partialTakeProfit} />
           <DecisionTile label="Break-even rule" value={final.breakEvenRule} />
           <DecisionTile label="Invalidation" value={final.invalidation} wide />
@@ -105,9 +110,10 @@ function getFinalDecision({
   const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "STRONG BUY" || (signal !== "WAIT" && plan.direction === "Bullish");
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
-  const orb = activeAnalysis?.orb ?? plan.orb;
-  const fvg = activeAnalysis?.fvg ?? plan.fvg;
-  const newsUnsafe = Boolean(fundamental.caution || activeAnalysis?.newsNearby);
+  const orb = plan.orb ?? activeAnalysis?.orb;
+  const fvg = plan.fvg ?? activeAnalysis?.fvg;
+  const trendFilter = plan.trendFilter ?? activeAnalysis?.trendFilter;
+  const newsUnsafe = Boolean(fundamental.caution || activeAnalysis?.newsNearby || orb?.newsSafe === false);
   const trendAligned = Boolean(
     (bullish && activeAnalysis?.trend === "bullish") ||
       (bearish && activeAnalysis?.trend === "bearish") ||
@@ -115,11 +121,13 @@ function getFinalDecision({
   );
   const orderBlockValid = Boolean(orderBlock && orderBlock.score >= 60 && orderBlock.strength !== "ignored");
   const liquidityConfirmed = Boolean(liquidity && (liquidity.rejectionConfirmed || liquidity.realBreakoutContinuation || (liquidity.sweepDetected && activeAnalysis?.liquiditySweep)));
-  const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || fvg?.rejectionConfirmed || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
+  const m1Confirmation = Boolean(fvg?.rejectionConfirmed || plan.waitReason.includes("M1 confirmation detected") || (signal !== "WAIT" && signal !== "ORB BREAKOUT WATCH" && signal !== "FVG RETEST WATCH" && !plan.missingConditions.some((condition) => condition.includes("M1 rejection"))));
+  const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || m1Confirmation || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
   const orbValid = Boolean(orb && orb.breakoutConfirmed && !orb.fakeBreakout && orb.status !== "ORB FAILED");
   const fvgValid = Boolean(fvg && fvg.score >= 50 && fvg.fillState !== "invalid" && fvg.fillState !== "full");
   const fvgRetested = Boolean(fvg?.touched);
-  const maSafe = !(activeAnalysis?.trendFilter ?? plan.trendFilter)?.strongAgainst;
+  const maSafe = !trendFilter?.strongAgainst;
+  const spreadSafe = orb?.spreadOk ?? !plan.missingConditions.includes("Spread safe");
   const checklist = [
     { label: "Trend aligned", status: statusFromBoolean(trendAligned) },
     { label: "OB valid", status: statusFromBoolean(orderBlockValid) },
@@ -127,7 +135,9 @@ function getFinalDecision({
     { label: "Rejection confirmed", status: statusFromBoolean(rejectionConfirmed) },
     { label: "ORB breakout", status: statusFromBoolean(orbValid) },
     { label: "FVG retest", status: statusFromBoolean(fvgValid && fvgRetested) },
+    { label: "M1 confirmation", status: statusFromBoolean(m1Confirmation) },
     { label: "MA safe", status: statusFromBoolean(maSafe) },
+    { label: "Spread safe", status: statusFromBoolean(spreadSafe) },
     { label: "News safe", status: newsUnsafe ? "no" : "yes" },
   ] satisfies Array<{ label: string; status: CheckStatus }>;
   const firstFailedCheck = checklist.find((item) => item.status !== "yes");
@@ -147,9 +157,14 @@ function getFinalDecision({
     entryZone,
     stopLoss: formatPrice(plan.stopLoss),
     takeProfits: `${formatPrice(plan.takeProfits[0])} / ${formatPrice(plan.takeProfits[1])}`,
+    orbRange: orb ? `High ${formatPrice(orb.high)} / Low ${formatPrice(orb.low)} (${orb.duration}m)` : "No 30-min ORB range yet",
     fvgZone: fvg ? `${formatPrice(fvg.low)} - ${formatPrice(fvg.high)}` : "No valid FVG zone yet",
     orbStatus: orb ? `${orb.status} ${orb.session} ${orb.duration}m, ${orb.confidence}/100. ${orb.missingConfirmation}` : "No London/New York ORB yet",
     fvgStatus: fvg ? `${fvg.direction} ${formatPrice(fvg.low)}-${formatPrice(fvg.high)}, fill ${fvg.fillPercent}%, ${fvg.fillState}, score ${fvg.score}/100. ${fvg.missingConfirmation}` : "No fresh M1/M5/M15 FVG",
+    retestStatus: fvg ? (fvg.touched ? `FVG retested, fill ${fvg.fillPercent}%` : "Waiting for FVG retest") : "Waiting for FVG after ORB breakout",
+    m1ConfirmationStatus: m1Confirmation ? "M1 rejection/confirmation detected" : "Waiting for M1 rejection or micro BOS/CHoCH",
+    maStatus: trendFilter ? `${trendFilter.type}${trendFilter.period} ${trendFilter.bias}, ${trendFilter.strongAgainst ? "against setup" : "safe bias"} (${trendFilter.distancePercent}%)` : "MA bias waiting for more candles",
+    safetyStatus: `${spreadSafe ? "Spread safe" : "Spread too wide"} / ${newsUnsafe ? "News blocked" : "News safe"}`,
     partialTakeProfit: `Take partial profit at TP1 ${formatPrice(plan.takeProfits[0])}`,
     breakEvenRule: "After TP1 is reached, move Stop Loss to Break Even",
     invalidation: getInvalidation({ orderBlock, plan, newsUnsafe, signal }),

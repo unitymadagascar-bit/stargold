@@ -971,7 +971,11 @@ function getTakeProfits(direction: Direction, price: number, risk: number): [num
 
 function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>, mode: SignalMode, preferredTimeframe?: Timeframe): Timeframe {
   if (mode === "scalping") {
-    if (preferredTimeframe && (preferredTimeframe === "M1" || preferredTimeframe === "M5") && candleMap[preferredTimeframe].length >= MIN_ANALYSIS_CANDLES) {
+    if (candleMap.M1.length >= MIN_ANALYSIS_CANDLES) {
+      return "M1";
+    }
+
+    if (preferredTimeframe && preferredTimeframe === "M5" && candleMap[preferredTimeframe].length >= MIN_ANALYSIS_CANDLES) {
       return preferredTimeframe;
     }
 

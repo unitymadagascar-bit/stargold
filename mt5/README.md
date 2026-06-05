@@ -3,7 +3,7 @@
 Ce bridge synchronise Star Gold By TSR avec le flux exact de ton MetaTrader 5 via un relais cloud persistant.
 
 ```text
-MT5 TradeTSRBridge -> Vercel ingest API -> Supabase relay -> Vercel app
+MT5 TradeTSRBridge -> local Windows relay or Vercel ingest API -> Supabase relay -> Vercel app
 ```
 
 ## Installation
@@ -37,6 +37,7 @@ http://127.0.0.1:3000
 ```
 
 Mais la production ne depend plus de localhost.
+Si ton graphique MT5 garde encore l'ancien `InpEndpoint=http://127.0.0.1:3000/api/market/mt5/ingest`, lance `scripts/start-star-gold-relay.bat`. Le relais local forwarde automatiquement vers Vercel/Supabase.
 
 ## Resultat attendu
 
@@ -80,4 +81,4 @@ Utilise les scripts dans `scripts/` :
 scripts\install-star-gold-mt5-startup.bat
 ```
 
-Sauvegarde ton profil MT5 avec le graphique XAUUSD et `TradeTSRBridge` attache. Apres redemarrage, Windows ouvre MT5, puis l'EA reconnecte automatiquement le flux quand `Algo Trading` est actif.
+Sauvegarde ton profil MT5 avec le graphique XAUUSD et `TradeTSRBridge` attache. Apres redemarrage, Windows ouvre MT5 et le relais local, puis l'EA reconnecte automatiquement le flux quand `Algo Trading` est actif.

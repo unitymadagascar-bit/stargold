@@ -11,6 +11,8 @@ import {
   type CandlestickData,
   type IChartApi,
   type ISeriesApi,
+  type Logical,
+  type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, LiveConnectionStatus, MarketTick, OrderBlockZone, Timeframe, TradePlan } from "@/types";
@@ -31,6 +33,10 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showLegend: false,
   showEmptyHelper: true,
 };
+
+const RIGHT_PADDING_BARS = 16;
+const MIN_VISIBLE_BARS = 24;
+const DEFAULT_VISIBLE_BARS = 95;
 
 export function GoldChart({
   candleMap,
@@ -55,6 +61,7 @@ export function GoldChart({
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [autoFollow, setAutoFollow] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
     if (typeof window === "undefined") {
       return defaultDisplaySettings;
@@ -74,6 +81,11 @@ export function GoldChart({
   const previousTimeframeRef = useRef<Timeframe | null>(null);
   const previousLengthRef = useRef(0);
   const latestCandleRef = useRef<Candle | null>(null);
+  const autoFollowRef = useRef(true);
+  const suppressRangeChangeRef = useRef(false);
+  const userRangeReadyRef = useRef(false);
+  const pointerScrollRef = useRef(false);
+  const wheelScrollLeftRef = useRef(false);
 
   const latestCandle = candles.at(-1) ?? null;
   latestCandleRef.current = latestCandle;
@@ -114,12 +126,13 @@ export function GoldChart({
         priceFormatter: (price: number) => price.toFixed(2),
       },
       rightPriceScale: {
+        autoScale: true,
         borderColor: "rgba(148, 163, 184, 0.18)",
         scaleMargins: { top: 0.08, bottom: 0.14 },
       },
       timeScale: {
         borderColor: "rgba(148, 163, 184, 0.18)",
-        rightOffset: 8,
+        rightOffset: RIGHT_PADDING_BARS,
         barSpacing: 9,
         timeVisible: true,
         secondsVisible: false,
@@ -166,10 +179,69 @@ export function GoldChart({
     chartRef.current = chart;
     seriesRef.current = series;
 
+    const markPointerScroll = () => {
+      pointerScrollRef.current = true;
+    };
+    const clearPointerScroll = () => {
+      window.setTimeout(() => {
+        pointerScrollRef.current = false;
+      }, 180);
+    };
+    const markWheelScroll = (event: WheelEvent) => {
+      if (event.deltaX < -1) {
+        wheelScrollLeftRef.current = true;
+        window.setTimeout(() => {
+          wheelScrollLeftRef.current = false;
+        }, 220);
+      }
+    };
+
+    container.addEventListener("pointerdown", markPointerScroll);
+    window.addEventListener("pointerup", clearPointerScroll);
+    container.addEventListener("wheel", markWheelScroll, { passive: true });
+
     return () => {
+      container.removeEventListener("pointerdown", markPointerScroll);
+      window.removeEventListener("pointerup", clearPointerScroll);
+      container.removeEventListener("wheel", markWheelScroll);
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    autoFollowRef.current = autoFollow;
+  }, [autoFollow]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) {
+      return;
+    }
+
+    const handleVisibleRangeChange = (range: LogicalRange | null) => {
+      if (!range || suppressRangeChangeRef.current || !userRangeReadyRef.current || !latestCandleRef.current) {
+        return;
+      }
+
+      const latestIndex = Math.max(0, previousLengthRef.current - 1);
+      const viewingHistory = range.to < latestIndex + 1;
+
+      if (viewingHistory && autoFollowRef.current) {
+        if (pointerScrollRef.current || wheelScrollLeftRef.current) {
+          setAutoFollow(false);
+          return;
+        }
+
+        keepLatestCandleVisible(false);
+      }
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
     };
   }, []);
 
@@ -182,10 +254,10 @@ export function GoldChart({
 
     const timeframeChanged = previousTimeframeRef.current !== timeframe;
     const historyReplaced = candles.length > previousLengthRef.current + 1;
+    const shouldFollow = autoFollowRef.current || timeframeChanged || previousLengthRef.current === 0;
 
     if (timeframeChanged || historyReplaced || previousLengthRef.current === 0) {
       series.setData(chartData);
-      chart.timeScale().fitContent();
     } else if (latestCandle) {
       series.update({
         time: latestCandle.time as UTCTimestamp,
@@ -199,6 +271,14 @@ export function GoldChart({
     previousTimeframeRef.current = timeframe;
     previousLengthRef.current = candles.length;
     setOhlc(latestCandle);
+
+    if (timeframeChanged) {
+      setAutoFollow(true);
+    }
+
+    if (candles.length && shouldFollow) {
+      keepLatestCandleVisible(timeframeChanged || historyReplaced);
+    }
   }, [candles.length, chartData, latestCandle, timeframe]);
 
   useEffect(() => {
@@ -294,6 +374,48 @@ export function GoldChart({
     };
   }, [candles.length, displaySettings.showOrderBlocks, orderBlock, plan.orderBlock, timeframe]);
 
+  function keepLatestCandleVisible(resetWidth = false) {
+    const timeScale = chartRef.current?.timeScale();
+    const range = timeScale?.getVisibleLogicalRange();
+    if (!timeScale || !candles.length) {
+      return;
+    }
+
+    const latestIndex = candles.length - 1;
+    const currentWidth = range ? range.to - range.from : DEFAULT_VISIBLE_BARS;
+    const width = Math.max(MIN_VISIBLE_BARS, resetWidth ? Math.min(DEFAULT_VISIBLE_BARS, Math.max(MIN_VISIBLE_BARS, candles.length + RIGHT_PADDING_BARS)) : currentWidth);
+    const to = latestIndex + RIGHT_PADDING_BARS;
+
+    setVisibleLogicalRange({ from: to - width, to });
+  }
+
+  function goToLatestCandle() {
+    setAutoFollow(true);
+    autoFollowRef.current = true;
+    keepLatestCandleVisible(false);
+  }
+
+  function fitLatestContent() {
+    setAutoFollow(true);
+    autoFollowRef.current = true;
+    keepLatestCandleVisible(true);
+  }
+
+  function setVisibleLogicalRange(range: { from: number; to: number }) {
+    const timeScale = chartRef.current?.timeScale();
+    if (!timeScale) {
+      return;
+    }
+
+    suppressRangeChangeRef.current = true;
+    timeScale.applyOptions({ rightOffset: RIGHT_PADDING_BARS });
+    timeScale.setVisibleLogicalRange({ from: range.from as Logical, to: range.to as Logical });
+    window.setTimeout(() => {
+      suppressRangeChangeRef.current = false;
+      userRangeReadyRef.current = true;
+    }, 120);
+  }
+
   function zoom(factor: number) {
     const timeScale = chartRef.current?.timeScale();
     const range = timeScale?.getVisibleLogicalRange();
@@ -301,9 +423,16 @@ export function GoldChart({
       return;
     }
 
+    const width = Math.max(MIN_VISIBLE_BARS, (range.to - range.from) * factor);
+
+    if (autoFollowRef.current && candles.length) {
+      const to = candles.length - 1 + RIGHT_PADDING_BARS;
+      setVisibleLogicalRange({ from: to - width, to });
+      return;
+    }
+
     const center = (range.from + range.to) / 2;
-    const width = Math.max(8, (range.to - range.from) * factor);
-    timeScale.setVisibleLogicalRange({ from: center - width / 2, to: center + width / 2 });
+    setVisibleLogicalRange({ from: center - width / 2, to: center + width / 2 });
   }
 
   return (
@@ -363,15 +492,29 @@ export function GoldChart({
           <IconButton label="Zoom avant" onClick={() => zoom(0.8)}>
             <Plus size={16} />
           </IconButton>
-          <IconButton label="Reset" onClick={() => chartRef.current?.timeScale().fitContent()}>
+          <IconButton label="Reset latest view" onClick={fitLatestContent}>
             <RotateCcw size={16} />
           </IconButton>
-          <IconButton label="Dernière bougie" onClick={() => chartRef.current?.timeScale().scrollToRealTime()}>
+          <IconButton label="Go to latest candle" onClick={goToLatestCandle}>
             <Crosshair size={16} />
           </IconButton>
         </div>
       </div>
       ) : null}
+
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+        <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${autoFollow ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-100"}`}>
+          {autoFollow ? "Live follow ON" : "Viewing history"}
+        </span>
+        <button
+          className="inline-flex h-8 items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
+          type="button"
+          onClick={goToLatestCandle}
+        >
+          <Crosshair size={15} />
+          Go to latest candle
+        </button>
+      </div>
 
       <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
         <div ref={containerRef} className="h-full w-full" />

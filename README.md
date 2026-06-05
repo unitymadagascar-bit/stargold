@@ -8,13 +8,14 @@ The production app must not read `localhost` from Vercel. The live flow is:
 
 ```text
 MT5 TradeTSRBridge on your PC
+  -> local Windows relay on 127.0.0.1:3000, or direct Vercel WebRequest if allowed
   -> https://tradetsr.vercel.app/api/market/mt5/ingest
   -> Supabase cloud relay tables
   -> Vercel XAUUSD APIs and live stream
   -> browser dashboard
 ```
 
-The old local/browser fallback is only for local development. In production, the browser uses relative Vercel API URLs and the Vercel server reads the cloud relay.
+The browser never reads localhost in production. The local Windows relay exists only because MT5 WebRequest settings can keep old local EA inputs or block cloud URLs; it forwards MT5 traffic to the cloud relay.
 
 ## Supabase relay setup
 
@@ -108,6 +109,8 @@ scripts\install-star-gold-mt5-startup.bat
 ```
 
 This adds a Startup shortcut script so Windows opens MT5 after login. MT5 will reload the saved profile, and the attached EA will reconnect to the cloud relay automatically when Algo Trading is active.
+
+The installer also starts `scripts/start-star-gold-relay.bat` at login. This local relay listens on `http://127.0.0.1:3000/api/market/mt5/ingest` and forwards every MT5 payload to the Vercel/Supabase cloud relay.
 
 ## Local development
 

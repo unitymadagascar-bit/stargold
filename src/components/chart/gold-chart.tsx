@@ -16,6 +16,7 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import type { Candle, LiveConnectionStatus, MarketTick, OrderBlockZone, Timeframe, TradePlan } from "@/types";
+import { calculateRSI } from "@/lib/indicators";
 import { timeframes } from "@/lib/market/timeframes";
 
 const defaultDisplaySettings: ChartDisplaySettings = {
@@ -30,6 +31,7 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showTradeLevels: false,
   showOrderBlocks: true,
   showLiquidityLevels: false,
+  showRsi: true,
   showLegend: false,
   showEmptyHelper: true,
 };
@@ -90,6 +92,8 @@ export function GoldChart({
   const latestCandle = candles.at(-1) ?? null;
   latestCandleRef.current = latestCandle;
   const lastPrice = lastTick?.price ?? latestCandle?.close ?? 0;
+  const rsiSeries = useMemo(() => calculateRsiSeries(candles.map((candle) => candle.close)), [candles]);
+  const currentRsi = useMemo(() => Number(calculateRSI(candles.map((candle) => candle.close)).toFixed(1)), [candles]);
   const chartData = useMemo<CandlestickData[]>(
     () =>
       candles.map((candle) => ({
@@ -539,6 +543,8 @@ export function GoldChart({
         {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
+      {displaySettings.showRsi ? <RsiPanel rsi={currentRsi} values={rsiSeries} /> : null}
+
       {displaySettings.showLegend ? (
       <div className="mt-3 grid gap-2 text-xs text-slate-400 sm:grid-cols-5">
         <Legend color="bg-sky-400" label="Support live" />
@@ -589,6 +595,7 @@ function DisplaySettingsPanel({
         <DisplayToggle checked={settings.showLiquidityLevels} label="Show liquidity/support levels" onChange={(value) => update("showLiquidityLevels", value)} />
         <DisplayToggle checked={settings.showOrderBlocks} label="Show order block zones" onChange={(value) => update("showOrderBlocks", value)} />
         <DisplayToggle checked={settings.showTradeLevels} label="Show trade levels" onChange={(value) => update("showTradeLevels", value)} />
+        <DisplayToggle checked={settings.showRsi} label="Show RSI 14" onChange={(value) => update("showRsi", value)} />
         <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
         <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
       </div>
@@ -700,6 +707,38 @@ function ScalpStatus({ active, label, value }: { active: boolean; label: string;
   );
 }
 
+function RsiPanel({ rsi, values }: { rsi: number; values: number[] }) {
+  const color = rsi >= 70 ? "#fb7185" : rsi <= 30 ? "#38bdf8" : rsi >= 55 ? "#34d399" : rsi <= 45 ? "#fbbf24" : "#cbd5e1";
+  const state = rsi >= 70 ? "Surachat" : rsi <= 30 ? "Survente" : rsi >= 55 ? "Momentum haussier" : rsi <= 45 ? "Momentum faible" : "Neutre";
+  const points = buildRsiPolyline(values.slice(-80), 760, 64);
+  const latestX = `${Math.max(0, Math.min(100, rsi))}%`;
+
+  return (
+    <div className="mt-2 rounded-md border border-white/10 bg-black/25 p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">RSI 14</span>
+          <span className="font-mono text-sm font-bold text-white">{Number.isFinite(rsi) ? rsi.toFixed(1) : "--"}</span>
+          <span className="rounded border px-2 py-0.5 text-[11px] font-semibold" style={{ borderColor: `${color}66`, color, backgroundColor: `${color}18` }}>
+            {state}
+          </span>
+        </div>
+        <div className="font-mono text-[11px] text-slate-500">70 / 50 / 30</div>
+      </div>
+
+      <div className="relative h-16 overflow-hidden rounded border border-white/10 bg-[#070b10]">
+        <div className="absolute left-0 right-0 top-[30%] border-t border-rose-300/20" />
+        <div className="absolute left-0 right-0 top-1/2 border-t border-slate-300/15" />
+        <div className="absolute left-0 right-0 top-[70%] border-t border-sky-300/20" />
+        <div className="absolute bottom-0 top-0 w-px bg-white/25" style={{ left: latestX }} />
+        <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" viewBox="0 0 760 64">
+          <polyline fill="none" points={points} stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 function addPriceLine(
   series: ISeriesApi<"Candlestick">,
   refs: ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[],
@@ -743,6 +782,7 @@ interface ChartDisplaySettings {
   showTradeLevels: boolean;
   showOrderBlocks: boolean;
   showLiquidityLevels: boolean;
+  showRsi: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;
 }
@@ -772,4 +812,37 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 function formatPrice(value?: number) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "--";
+}
+
+function calculateRsiSeries(values: number[], period = 14) {
+  if (values.length <= period) {
+    return values.map(() => 50);
+  }
+
+  return values.map((_, index) => {
+    if (index < period) {
+      return 50;
+    }
+
+    return calculateRSI(values.slice(0, index + 1), period);
+  });
+}
+
+function buildRsiPolyline(values: number[], width: number, height: number) {
+  if (!values.length) {
+    return "";
+  }
+
+  if (values.length === 1) {
+    const y = height - (Math.max(0, Math.min(100, values[0])) / 100) * height;
+    return `0,${y.toFixed(2)} ${width},${y.toFixed(2)}`;
+  }
+
+  return values
+    .map((value, index) => {
+      const x = (index / (values.length - 1)) * width;
+      const y = height - (Math.max(0, Math.min(100, value)) / 100) * height;
+      return `${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(" ");
 }

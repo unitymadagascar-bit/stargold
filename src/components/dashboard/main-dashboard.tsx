@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Activity, Gauge, ShieldCheck, Target, Wifi, WifiOff, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
+import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, Signal, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -18,6 +18,20 @@ import { useLiveXauusd } from "@/hooks/use-live-xauusd";
 import { buildLiveTimeframeAnalyses, buildLiveTradePlan, getLatestPrice } from "@/lib/analysis/live-analysis";
 import { macroContext, newsEvents } from "@/lib/static-context";
 
+const alertCooldownOptions = [
+  { label: "30 sec", value: 30_000 },
+  { label: "1 min", value: 60_000 },
+  { label: "3 min", value: 180_000 },
+  { label: "5 min", value: 300_000 },
+];
+
+const defaultAlertSettings: AlertSettings = {
+  alertOnWatch: false,
+  browserEnabled: false,
+  cooldownMs: 60_000,
+  soundEnabled: false,
+};
+
 export function MainDashboard() {
   const live = useLiveXauusd();
   const fundamentals = useFundamentalContext();
@@ -28,6 +42,10 @@ export function MainDashboard() {
   const [orbRequireRetest, setOrbRequireRetest] = useState(false);
   const [movingAverageType, setMovingAverageType] = useState<MovingAverageType>("EMA");
   const [movingAveragePeriod, setMovingAveragePeriod] = useState(50);
+  const [alertSettings, setAlertSettings] = useState<AlertSettings>(() => loadAlertSettings());
+  const [alertHistory, setAlertHistory] = useState<AlertHistoryItem[]>(() => loadAlertHistory());
+  const [notificationStatus, setNotificationStatus] = useState(() => getNotificationStatus());
+  const lastAlertRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const timeframeAnalyses = useMemo(
     () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread }),
@@ -50,6 +68,71 @@ export function MainDashboard() {
       setActiveTimeframe("M5");
     }
   };
+
+  useEffect(() => {
+    window.localStorage.setItem("tradetsr-alert-settings", JSON.stringify(alertSettings));
+  }, [alertSettings]);
+
+  useEffect(() => {
+    window.localStorage.setItem("tradetsr-alert-history", JSON.stringify(alertHistory.slice(0, 20)));
+  }, [alertHistory]);
+
+  useEffect(() => {
+    const candidate = getTradingAlertCandidate({ alertOnWatch: alertSettings.alertOnWatch, plan, price: latestPrice });
+
+    if (!candidate || (!alertSettings.soundEnabled && !alertSettings.browserEnabled)) {
+      return;
+    }
+
+    const now = Date.now();
+    const previous = lastAlertRef.current;
+    const sameSetupCoolingDown = previous.id === candidate.id && now - previous.time < alertSettings.cooldownMs;
+
+    if (sameSetupCoolingDown) {
+      return;
+    }
+
+    lastAlertRef.current = { id: candidate.id, time: now };
+
+    if (alertSettings.soundEnabled) {
+      playAlertSound();
+    }
+
+    if (alertSettings.browserEnabled) {
+      showBrowserNotification(candidate, setNotificationStatus);
+    }
+
+    setAlertHistory((history) => [candidate.historyItem, ...history].slice(0, 20));
+  }, [
+    alertSettings.alertOnWatch,
+    alertSettings.browserEnabled,
+    alertSettings.cooldownMs,
+    alertSettings.soundEnabled,
+    latestPrice,
+    plan.decision,
+    plan.direction,
+    plan.entry,
+    plan.score,
+    plan.stopLoss,
+    plan.takeProfits,
+    plan.waitReason,
+  ]);
+
+  async function requestNotificationPermission() {
+    if (!("Notification" in window)) {
+      setNotificationStatus("Browser notifications are not supported in this browser.");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setNotificationStatus(
+      permission === "granted"
+        ? "Browser notifications enabled."
+        : permission === "denied"
+          ? "Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app."
+          : "Notification permission was not granted yet.",
+    );
+  }
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1340px] px-3 py-3 sm:px-4 lg:px-5">
@@ -134,6 +217,14 @@ export function MainDashboard() {
             orbRequireRetest={orbRequireRetest}
             plan={plan}
             sensitivity={scalpingSensitivity}
+          />
+          <TradingAlertsPanel
+            history={alertHistory}
+            notificationStatus={notificationStatus}
+            onRequestPermission={requestNotificationPermission}
+            onSettingsChange={setAlertSettings}
+            onTestSound={playAlertSound}
+            settings={alertSettings}
           />
           <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
           <TradeChecklist />
@@ -496,6 +587,109 @@ function SignalModePanel({
   );
 }
 
+function TradingAlertsPanel({
+  history,
+  notificationStatus,
+  onRequestPermission,
+  onSettingsChange,
+  onTestSound,
+  settings,
+}: {
+  history: AlertHistoryItem[];
+  notificationStatus: string;
+  onRequestPermission: () => void;
+  onSettingsChange: (settings: AlertSettings) => void;
+  onTestSound: () => void;
+  settings: AlertSettings;
+}) {
+  function update<K extends keyof AlertSettings>(key: K, value: AlertSettings[K]) {
+    onSettingsChange({ ...settings, [key]: value });
+  }
+
+  return (
+    <section className="rounded-md border border-white/10 bg-[#171717] p-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-amber-100">
+          <BellRing size={17} />
+          <p className="text-sm font-semibold">Trading Alerts</p>
+        </div>
+        <span className="rounded border border-white/10 bg-black/25 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-300">
+          Analysis only
+        </span>
+      </div>
+
+      <div className="mt-3 grid gap-1.5 text-sm text-slate-200">
+        <AlertToggle checked={settings.soundEnabled} label="Enable Sound Alerts" onChange={(value) => update("soundEnabled", value)} />
+        <AlertToggle checked={settings.browserEnabled} label="Enable Browser Notifications" onChange={(value) => update("browserEnabled", value)} />
+        <AlertToggle checked={settings.alertOnWatch} label="Alert on WATCH signals" onChange={(value) => update("alertOnWatch", value)} />
+      </div>
+
+      <div className="mt-3 rounded-md border border-white/10 bg-black/25 p-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Cooldown</p>
+        <div className="grid grid-cols-4 gap-1">
+          {alertCooldownOptions.map((option) => (
+            <SensitivityButton key={option.value} active={settings.cooldownMs === option.value} label={option.label} onClick={() => update("cooldownMs", option.value)} />
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <button className="inline-flex h-9 items-center justify-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]" type="button" onClick={onTestSound}>
+          <Volume2 size={15} />
+          Test sound
+        </button>
+        <button className="inline-flex h-9 items-center justify-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]" type="button" onClick={onRequestPermission}>
+          <Bell size={15} />
+          Request permission
+        </button>
+      </div>
+
+      <p className="mt-3 rounded border border-sky-300/15 bg-sky-300/10 px-3 py-2 text-xs leading-5 text-sky-100">{notificationStatus}</p>
+      {notificationStatus.includes("blocked") || notificationStatus.includes("Blocked") ? (
+        <p className="mt-2 rounded border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          Browser blocked notifications. Open site settings for tradetsr.vercel.app and allow Notifications, then click Request permission again.
+        </p>
+      ) : null}
+
+      <div className="mt-3 border-t border-white/10 pt-3">
+        <div className="mb-2 flex items-center gap-2 text-slate-300">
+          <Clock size={15} />
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Alert history</p>
+        </div>
+        <div className="space-y-1.5">
+          {history.length ? (
+            history.slice(0, 8).map((item) => (
+              <div key={item.id} className="rounded-md border border-white/10 bg-black/25 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs font-bold text-white">{item.signal}</span>
+                  <span className="font-mono text-[10px] text-slate-500">{formatAlertTime(item.time)}</span>
+                </div>
+                <p className="mt-1 font-mono text-xs text-slate-300">XAUUSD {formatPrice(item.price)}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{item.reason}</p>
+              </div>
+            ))
+          ) : (
+            <p className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-400">No alerts yet. Alerts trigger only on real actionable setups unless WATCH alerts are enabled.</p>
+          )}
+        </div>
+      </div>
+
+      <p className="mt-3 rounded border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+        Alert is for analysis only, not guaranteed profit. It never executes trades automatically.
+      </p>
+    </section>
+  );
+}
+
+function AlertToggle({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-1 transition hover:bg-white/[0.04]">
+      <input className="size-4 accent-amber-300" type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 function SensitivityButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <button className={`h-8 rounded px-2 text-[11px] font-semibold transition ${active ? "bg-amber-200 text-black" : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"}`} type="button" onClick={onClick}>
@@ -537,6 +731,143 @@ function formatSensitivity(sensitivity: ScalpingSensitivity) {
   }
 
   return "Balanced";
+}
+
+function getTradingAlertCandidate({ alertOnWatch, plan, price }: { alertOnWatch: boolean; plan: TradePlan; price: number }): TradingAlertCandidate | null {
+  const actionableSignals: Signal[] = ["BUY SCALP READY", "SELL SCALP READY", "STRONG BUY", "STRONG SELL"];
+  const watchSignals: Signal[] = ["WATCH BUY", "WATCH SELL", "ORB BREAKOUT WATCH", "FVG RETEST WATCH"];
+  const eligible = actionableSignals.includes(plan.decision) || (alertOnWatch && watchSignals.includes(plan.decision));
+
+  if (!eligible) {
+    return null;
+  }
+
+  const entryZone = plan.fvg ? `${formatPrice(plan.fvg.low)} - ${formatPrice(plan.fvg.high)}` : `Around ${formatPrice(plan.entry)}`;
+  const id = [
+    plan.decision,
+    plan.direction,
+    Math.round(plan.entry * 100),
+    Math.round(plan.stopLoss * 100),
+    Math.round(plan.takeProfits[0] * 100),
+    Math.round(plan.score),
+  ].join("|");
+  const reason = plan.waitReason || plan.summary;
+  const historyItem: AlertHistoryItem = {
+    id: `${id}|${Date.now()}`,
+    price,
+    reason,
+    signal: plan.decision,
+    time: Date.now(),
+  };
+
+  return {
+    body: `XAUUSD | Entry ${entryZone} | SL ${formatPrice(plan.stopLoss)} | TP1 ${formatPrice(plan.takeProfits[0])} | Confidence ${Math.round(plan.score)}%`,
+    historyItem,
+    id,
+    reason,
+    title: `${plan.decision} - XAUUSD`,
+  };
+}
+
+function playAlertSound() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const AudioContextCtor = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  const context = new AudioContextCtor();
+  const gain = context.createGain();
+  gain.connect(context.destination);
+  gain.gain.setValueAtTime(0.001, context.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.16, context.currentTime + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.55);
+
+  [0, 0.18, 0.36].forEach((offset, index) => {
+    const oscillator = context.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(index === 1 ? 1046 : 784, context.currentTime + offset);
+    oscillator.connect(gain);
+    oscillator.start(context.currentTime + offset);
+    oscillator.stop(context.currentTime + offset + 0.12);
+  });
+
+  window.setTimeout(() => {
+    void context.close();
+  }, 900);
+}
+
+function showBrowserNotification(candidate: TradingAlertCandidate, setNotificationStatus: (status: string) => void) {
+  if (!("Notification" in window)) {
+    setNotificationStatus("Browser notifications are not supported in this browser.");
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    setNotificationStatus("Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app.");
+    return;
+  }
+
+  if (Notification.permission !== "granted") {
+    setNotificationStatus("Notifications not enabled. Click Request permission before browser alerts can appear.");
+    return;
+  }
+
+  new Notification(candidate.title, {
+    body: candidate.body,
+    icon: "/icon.png",
+    tag: candidate.id,
+  });
+  setNotificationStatus("Browser notification sent.");
+}
+
+function loadAlertSettings(): AlertSettings {
+  if (typeof window === "undefined") {
+    return defaultAlertSettings;
+  }
+
+  try {
+    const saved = window.localStorage.getItem("tradetsr-alert-settings");
+    return saved ? { ...defaultAlertSettings, ...JSON.parse(saved) } : defaultAlertSettings;
+  } catch {
+    return defaultAlertSettings;
+  }
+}
+
+function loadAlertHistory(): AlertHistoryItem[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const saved = window.localStorage.getItem("tradetsr-alert-history");
+    return saved ? JSON.parse(saved) : [];
+  } catch {
+    return [];
+  }
+}
+
+function getNotificationStatus() {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "Browser notifications are not supported in this browser.";
+  }
+
+  if (Notification.permission === "granted") {
+    return "Browser notifications enabled.";
+  }
+
+  if (Notification.permission === "denied") {
+    return "Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app.";
+  }
+
+  return "Click Request permission to enable browser notifications.";
+}
+
+function formatAlertTime(value: number) {
+  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function LiquidityPanel({ liquidity }: { liquidity: LiquidityAnalysis | null | undefined }) {
@@ -729,4 +1060,27 @@ function formatTickTime(value?: number) {
   }
 
   return new Date(value * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+interface AlertSettings {
+  alertOnWatch: boolean;
+  browserEnabled: boolean;
+  cooldownMs: number;
+  soundEnabled: boolean;
+}
+
+interface AlertHistoryItem {
+  id: string;
+  price: number;
+  reason: string;
+  signal: Signal;
+  time: number;
+}
+
+interface TradingAlertCandidate {
+  body: string;
+  historyItem: AlertHistoryItem;
+  id: string;
+  reason: string;
+  title: string;
 }

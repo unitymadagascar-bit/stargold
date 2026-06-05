@@ -34,6 +34,7 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showRsi: true,
   showOrb: true,
   showFvg: true,
+  showRiskRewardBox: true,
   showLegend: false,
   showEmptyHelper: true,
 };
@@ -69,6 +70,7 @@ export function GoldChart({
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const [fvgOverlay, setFvgOverlay] = useState<OrderBlockOverlay | null>(null);
+  const [riskRewardOverlay, setRiskRewardOverlay] = useState<RiskRewardOverlay | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
@@ -422,6 +424,41 @@ export function GoldChart({
     });
   }, [candles.length, displaySettings.showFvg, fvg, timeframe]);
 
+  useEffect(() => {
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+    const container = containerRef.current;
+
+    if (!series || !chart || !container || !displaySettings.showRiskRewardBox) {
+      setRiskRewardOverlay(null);
+      return;
+    }
+
+    const updateOverlay = () => {
+      const overlay = buildRiskRewardOverlay({ containerWidth: container.clientWidth, plan, series });
+      setRiskRewardOverlay(overlay);
+    };
+
+    updateOverlay();
+    chart.subscribeCrosshairMove(updateOverlay);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(updateOverlay);
+
+    return () => {
+      chart.unsubscribeCrosshairMove(updateOverlay);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(updateOverlay);
+    };
+  }, [
+    candles.length,
+    displaySettings.showRiskRewardBox,
+    plan.decision,
+    plan.direction,
+    plan.entry,
+    plan.riskReward,
+    plan.stopLoss,
+    plan.takeProfits,
+    timeframe,
+  ]);
+
   function keepLatestCandleVisible(resetWidth = false) {
     const timeScale = chartRef.current?.timeScale();
     const range = timeScale?.getVisibleLogicalRange();
@@ -602,6 +639,7 @@ export function GoldChart({
             </span>
           </div>
         ) : null}
+        {riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
         {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
       </div>
 
@@ -660,6 +698,7 @@ function DisplaySettingsPanel({
         <DisplayToggle checked={settings.showRsi} label="Show RSI 14" onChange={(value) => update("showRsi", value)} />
         <DisplayToggle checked={settings.showOrb} label="Show ORB high/low" onChange={(value) => update("showOrb", value)} />
         <DisplayToggle checked={settings.showFvg} label="Show FVG zones" onChange={(value) => update("showFvg", value)} />
+        <DisplayToggle checked={settings.showRiskRewardBox} label="Show Risk/Reward Box" onChange={(value) => update("showRiskRewardBox", value)} />
         <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
         <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
       </div>
@@ -826,12 +865,145 @@ function addPriceLine(
   );
 }
 
+function buildRiskRewardOverlay({
+  containerWidth,
+  plan,
+  series,
+}: {
+  containerWidth: number;
+  plan: TradePlan;
+  series: ISeriesApi<"Candlestick">;
+}): RiskRewardOverlay | null {
+  if (plan.decision === "WAIT" || plan.direction === "Neutral") {
+    return null;
+  }
+
+  const entry = plan.entry;
+  const stopLoss = plan.stopLoss;
+  const tp1 = plan.takeProfits[0];
+  const tp2 = plan.takeProfits[1] || plan.takeProfits[0];
+  const validPrices = [entry, stopLoss, tp1, tp2].every((price) => Number.isFinite(price) && price > 0);
+
+  if (!validPrices) {
+    return null;
+  }
+
+  const bullish = plan.direction === "Bullish";
+  const entryY = series.priceToCoordinate(entry);
+  const stopY = series.priceToCoordinate(stopLoss);
+  const tp1Y = series.priceToCoordinate(tp1);
+  const tp2Y = series.priceToCoordinate(tp2);
+
+  if (entryY === null || stopY === null || tp1Y === null || tp2Y === null) {
+    return null;
+  }
+
+  const coherent =
+    bullish
+      ? tp1 > entry && tp2 > entry && stopLoss < entry
+      : tp1 < entry && tp2 < entry && stopLoss > entry;
+
+  if (!coherent) {
+    return null;
+  }
+
+  const compact = containerWidth < 560;
+  const left = compact ? 44 : Math.max(62, Math.floor(containerWidth * 0.54));
+  const width = compact ? Math.max(120, containerWidth - left - 44) : Math.max(170, Math.min(310, containerWidth - left - 62));
+  const preview = plan.decision.includes("WATCH");
+  const tpForRatio = Math.abs(tp1 - entry);
+  const riskForRatio = Math.abs(entry - stopLoss);
+  const rr = riskForRatio > 0 ? tpForRatio / riskForRatio : plan.riskReward;
+
+  return {
+    entry,
+    entryY,
+    left,
+    preview,
+    profit: {
+      top: Math.min(entryY, tp2Y),
+      height: Math.max(4, Math.abs(tp2Y - entryY)),
+    },
+    risk: {
+      top: Math.min(entryY, stopY),
+      height: Math.max(4, Math.abs(stopY - entryY)),
+    },
+    rr: Number(rr.toFixed(2)),
+    sl: stopLoss,
+    slY: stopY,
+    tp1,
+    tp1Y,
+    tp2,
+    tp2Y,
+    width,
+  };
+}
+
+function RiskRewardBox({ overlay }: { overlay: RiskRewardOverlay }) {
+  const borderStyle = overlay.preview ? "border-dashed" : "border-solid";
+  const panelClass = overlay.preview ? "opacity-80" : "opacity-95";
+
+  return (
+    <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: overlay.left, width: overlay.width }}>
+      <div
+        className={`absolute left-0 right-0 rounded-sm border ${borderStyle} border-emerald-300/70 bg-emerald-400/16 ${panelClass}`}
+        style={{ top: overlay.profit.top, height: overlay.profit.height }}
+      />
+      <div
+        className={`absolute left-0 right-0 rounded-sm border ${borderStyle} border-rose-300/70 bg-rose-400/16 ${panelClass}`}
+        style={{ top: overlay.risk.top, height: overlay.risk.height }}
+      />
+      <RiskRewardLine color="bg-amber-200" label={`Entry ${formatPrice(overlay.entry)}`} top={overlay.entryY} />
+      <RiskRewardLine color="bg-rose-300" label={`Stop Loss ${formatPrice(overlay.sl)}`} top={overlay.slY} />
+      <RiskRewardLine color="bg-emerald-300" label={`TP1 ${formatPrice(overlay.tp1)}`} top={overlay.tp1Y} />
+      <RiskRewardLine color="bg-emerald-400" label={`TP2 ${formatPrice(overlay.tp2)}`} top={overlay.tp2Y} />
+      <span className="absolute right-1 rounded border border-white/10 bg-black/70 px-2 py-1 font-mono text-[10px] font-bold text-white shadow-lg" style={{ top: Math.max(4, overlay.profit.top - 26) }}>
+        RR 1:{overlay.rr.toFixed(2)}
+      </span>
+      <span className="absolute left-1 top-2 rounded border border-white/10 bg-black/65 px-2 py-1 text-[10px] font-semibold text-slate-200 shadow-lg">
+        Visual plan only
+      </span>
+      {overlay.preview ? (
+        <span className="absolute left-1 rounded border border-amber-300/25 bg-black/70 px-2 py-1 text-[10px] font-semibold text-amber-100 shadow-lg" style={{ top: Math.max(4, overlay.risk.top + overlay.risk.height + 6) }}>
+          Preview only
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function RiskRewardLine({ color, label, top }: { color: string; label: string; top: number }) {
+  return (
+    <div className="absolute left-0 right-0" style={{ top }}>
+      <div className={`h-px ${color}`} />
+      <span className="absolute right-1 top-1 rounded bg-black/75 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-white shadow-lg">{label}</span>
+    </div>
+  );
+}
+
 interface OrderBlockOverlay {
   top: number;
   height: number;
   background: string;
   border: string;
   label: string;
+}
+
+interface RiskRewardOverlay {
+  entry: number;
+  entryY: number;
+  left: number;
+  preview: boolean;
+  profit: { top: number; height: number };
+  risk: { top: number; height: number };
+  rr: number;
+  sl: number;
+  slY: number;
+  tp1: number;
+  tp1Y: number;
+  tp2: number;
+  tp2Y: number;
+  width: number;
 }
 
 interface ChartDisplaySettings {
@@ -849,6 +1021,7 @@ interface ChartDisplaySettings {
   showRsi: boolean;
   showOrb: boolean;
   showFvg: boolean;
+  showRiskRewardBox: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;
 }

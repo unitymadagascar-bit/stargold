@@ -774,7 +774,7 @@ function DisplaySettingsPanel({
   }
 
   return (
-    <div className="absolute right-0 top-10 z-30 w-72 rounded-md border border-white/15 bg-[#101419] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
+    <div className="absolute right-0 top-10 z-[60] w-72 rounded-md border border-white/15 bg-[#101419] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
       <div className="mb-2 flex items-center justify-between gap-3 border-b border-white/10 pb-2">
         <div>
           <p className="text-sm font-semibold text-white">Affichage</p>
@@ -1020,7 +1020,7 @@ function SyncWarning({
   };
 }) {
   return (
-    <div className="pointer-events-none absolute left-3 right-3 top-3 z-30 rounded-md border border-rose-300/30 bg-[#1f0b12]/90 px-3 py-2 shadow-[0_14px_45px_rgba(0,0,0,0.45)] backdrop-blur">
+    <div className="pointer-events-none absolute bottom-3 left-3 z-20 max-w-[min(560px,calc(100%-1.5rem))] rounded-md border border-rose-300/30 bg-[#1f0b12]/90 px-3 py-2 shadow-[0_14px_45px_rgba(0,0,0,0.45)] backdrop-blur">
       <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-100">{syncState.status}</p>
       <p className="mt-1 text-xs font-semibold leading-5 text-white">{syncState.message}</p>
       {syncState.priceWarning ? <p className="mt-1 text-[11px] leading-4 text-rose-100">{syncState.priceWarning}</p> : null}

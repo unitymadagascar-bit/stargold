@@ -92,7 +92,7 @@ export function MainDashboard() {
   }, [alertHistory]);
 
   useEffect(() => {
-    const candidate = getTradingAlertCandidate({ alertOnWatch: alertSettings.alertOnWatch, plan, price: latestPrice, symbol: symbolProfile.symbol });
+    const candidate = getTradingAlertCandidate({ alertOnWatch: alertSettings.alertOnWatch, analyses: timeframeAnalyses, price: latestPrice, symbol: symbolProfile.symbol });
 
     if (!candidate || (!alertSettings.soundEnabled && !alertSettings.browserEnabled)) {
       return;
@@ -123,14 +123,8 @@ export function MainDashboard() {
     alertSettings.cooldownMs,
     alertSettings.soundEnabled,
     latestPrice,
-    plan.decision,
-    plan.direction,
-    plan.entry,
-    plan.score,
-    plan.stopLoss,
-    plan.takeProfits,
-    plan.waitReason,
     symbolProfile.symbol,
+    timeframeAnalyses,
   ]);
 
   async function requestNotificationPermission() {
@@ -770,7 +764,7 @@ function TradingAlertsPanel({
             history.slice(0, 8).map((item) => (
               <div key={item.id} className="rounded-md border border-white/10 bg-black/25 px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-xs font-bold text-white">{item.signal}</span>
+                  <span className="font-mono text-xs font-bold text-white">{item.timeframe ? `${item.signal} ${item.timeframe}` : item.signal}</span>
                   <span className="font-mono text-[10px] text-slate-500">{formatAlertTime(item.time)}</span>
                 </div>
                 <p className="mt-1 font-mono text-xs text-slate-300">{item.symbol ?? symbol} {formatPrice(item.price)}</p>
@@ -842,41 +836,90 @@ function formatSensitivity(sensitivity: ScalpingSensitivity) {
   return "Balanced";
 }
 
-function getTradingAlertCandidate({ alertOnWatch, plan, price, symbol }: { alertOnWatch: boolean; plan: TradePlan; price: number; symbol: string }): TradingAlertCandidate | null {
-  const actionableSignals: Signal[] = ["BUY SCALP READY", "SELL SCALP READY", "STRONG BUY", "STRONG SELL"];
-  const watchSignals: Signal[] = ["WATCH BUY", "WATCH SELL", "ORB BREAKOUT WATCH", "FVG RETEST WATCH"];
-  const eligible = actionableSignals.includes(plan.decision) || (alertOnWatch && watchSignals.includes(plan.decision));
+const alertTimeframes: Timeframe[] = ["M1", "M5", "M15", "M30"];
 
-  if (!eligible) {
+function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { alertOnWatch: boolean; analyses: TimeframeAnalysis[]; price: number; symbol: string }): TradingAlertCandidate | null {
+  const directSignals: Signal[] = ["BUY", "SELL"];
+  const watchSignals: Signal[] = ["WATCH BUY", "WATCH SELL"];
+  const candidates = alertTimeframes
+    .map((timeframe) => analyses.find((analysis) => analysis.timeframe === timeframe))
+    .filter((analysis): analysis is TimeframeAnalysis => Boolean(analysis))
+    .filter((analysis) => directSignals.includes(analysis.signal) || (alertOnWatch && watchSignals.includes(analysis.signal)))
+    .sort((a, b) => getAlertSignalPriority(b.signal) - getAlertSignalPriority(a.signal) || b.score - a.score);
+  const analysis = candidates[0];
+
+  if (!analysis) {
     return null;
   }
 
-  const entryZone = plan.fvg ? `${formatPrice(plan.fvg.low)} - ${formatPrice(plan.fvg.high)}` : `Around ${formatPrice(plan.entry)}`;
+  const entryZone = getAlertEntryZone(analysis, price);
+  const stopLoss = getAlertStopLoss(analysis, price);
+  const takeProfit = getAlertTakeProfit(analysis, price);
   const id = [
-    plan.decision,
-    plan.direction,
-    Math.round(plan.entry * 100),
-    Math.round(plan.stopLoss * 100),
-    Math.round(plan.takeProfits[0] * 100),
-    Math.round(plan.score),
+    symbol,
+    analysis.timeframe,
+    analysis.signal,
+    Math.round(price * 100),
+    Math.round(analysis.score),
   ].join("|");
-  const reason = plan.waitReason || plan.summary;
+  const reason = analysis.waitReason || analysis.summary;
   const historyItem: AlertHistoryItem = {
     id: `${id}|${Date.now()}`,
     price,
     reason,
-    signal: plan.decision,
+    signal: analysis.signal,
     symbol,
+    timeframe: analysis.timeframe,
     time: Date.now(),
   };
 
   return {
-    body: `${symbol} | Entry ${entryZone} | SL ${formatPrice(plan.stopLoss)} | TP1 ${formatPrice(plan.takeProfits[0])} | Confidence ${Math.round(plan.score)}%`,
+    body: `${symbol} ${analysis.timeframe} | Entry ${entryZone} | SL ${stopLoss} | TP1 ${takeProfit} | Confidence ${Math.round(analysis.score)}%`,
     historyItem,
     id,
     reason,
-    title: `${plan.decision} - ${symbol}`,
+    title: `${analysis.signal} ${analysis.timeframe} - ${symbol}`,
   };
+}
+
+function getAlertSignalPriority(signal: Signal) {
+  if (signal === "BUY" || signal === "SELL") {
+    return 2;
+  }
+
+  if (signal === "WATCH BUY" || signal === "WATCH SELL") {
+    return 1;
+  }
+
+  return 0;
+}
+
+function getAlertEntryZone(analysis: TimeframeAnalysis, price: number) {
+  if (analysis.fvg) {
+    return `${formatPrice(analysis.fvg.low)} - ${formatPrice(analysis.fvg.high)}`;
+  }
+
+  if (analysis.orderBlock) {
+    return `${formatPrice(analysis.orderBlock.low)} - ${formatPrice(analysis.orderBlock.high)}`;
+  }
+
+  return `Around ${formatPrice(price)}`;
+}
+
+function getAlertStopLoss(analysis: TimeframeAnalysis, price: number) {
+  if (analysis.signal.includes("BUY")) {
+    return formatPrice(analysis.support || price - analysis.atr);
+  }
+
+  return formatPrice(analysis.resistance || price + analysis.atr);
+}
+
+function getAlertTakeProfit(analysis: TimeframeAnalysis, price: number) {
+  if (analysis.signal.includes("BUY")) {
+    return formatPrice(analysis.resistance || price + analysis.atr);
+  }
+
+  return formatPrice(analysis.support || price - analysis.atr);
 }
 
 function playAlertSound() {
@@ -1246,6 +1289,7 @@ interface AlertHistoryItem {
   reason: string;
   signal: Signal;
   symbol: string;
+  timeframe?: Timeframe;
   time: number;
 }
 

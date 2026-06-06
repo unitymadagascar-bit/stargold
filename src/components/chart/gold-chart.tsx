@@ -48,6 +48,7 @@ export function GoldChart({
   connectionMessage,
   connectionSource,
   connectionStatus,
+  executionSourceLabel,
   lastTick,
   orderBlock,
   fvg,
@@ -55,12 +56,14 @@ export function GoldChart({
   onTimeframeChange,
   plan,
   symbolProfile,
+  syncState,
   timeframe,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   connectionMessage: string;
   connectionSource: string | null;
   connectionStatus: LiveConnectionStatus;
+  executionSourceLabel: string;
   lastTick: MarketTick | null;
   orderBlock?: OrderBlockZone | null;
   fvg?: FvgAnalysis | null;
@@ -68,6 +71,11 @@ export function GoldChart({
   onTimeframeChange: (timeframe: Timeframe) => void;
   plan: TradePlan;
   symbolProfile: SymbolProfile;
+  syncState: {
+    message: string;
+    priceWarning: string | null;
+    status: "SYNC OK" | "PARTIAL SYNC" | "NOT SYNCED";
+  };
   timeframe: Timeframe;
 }) {
   const candles = candleMap[timeframe];
@@ -122,21 +130,22 @@ export function GoldChart({
   );
   const tradingViewSymbol = getTradingViewFallbackSymbol(symbolProfile.symbol);
   const cryptoTradingViewAvailable = Boolean(tradingViewSymbol && symbolProfile.category === "Crypto");
-  const cryptoOhlcActive = connectionSource === "Crypto OHLC Feed" || (symbolProfile.category === "Crypto" && candles.length >= 30);
-  const showTradingViewFallback = Boolean(displaySettings.showEmptyHelper && cryptoTradingViewAvailable && (cryptoOhlcActive || fallbackDelayElapsed));
+  const exnessSourceConfirmed = isExnessSource(connectionSource);
+  const cryptoOhlcActive = connectionSource === "Crypto OHLC Feed";
+  const showTradingViewFallback = Boolean(displaySettings.showEmptyHelper && cryptoTradingViewAvailable && !exnessSourceConfirmed && (cryptoOhlcActive || fallbackDelayElapsed));
   const marketClosed = Boolean(displaySettings.showEmptyHelper && !candles.length && !showTradingViewFallback && isLikelyWeekendClosed(symbolProfile.category));
   const chartSourceLabel = showTradingViewFallback ? "TradingView Crypto" : "MT5 Bridge";
   const analysisSourceLabel = showTradingViewFallback
     ? cryptoOhlcActive
       ? "Crypto OHLC Feed"
       : "TradingView visual mode"
-    : cryptoOhlcActive
-      ? "Crypto OHLC Feed"
-      : symbolProfile.category === "Crypto"
-        ? candles.length
-          ? "Crypto OHLC Feed"
-          : "TradingView visual mode"
-        : "MT5 Bridge OHLC";
+    : exnessSourceConfirmed
+      ? "Exness / MT5 Bridge"
+      : cryptoOhlcActive
+        ? "Crypto OHLC Feed"
+        : symbolProfile.category === "Crypto"
+          ? "TradingView visual mode"
+          : "MT5 Bridge OHLC";
   const lastAnalysisCandleLabel = candles.at(-1) ? formatUtcTime(candles.at(-1)?.time) : "--";
   const fallbackHint =
     showTradingViewFallback && connectionSource
@@ -649,6 +658,12 @@ export function GoldChart({
           <span className="rounded border border-violet-300/25 bg-violet-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100">
             Source analyse : {analysisSourceLabel}
           </span>
+          <span className="rounded border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-100">
+            Source execution : {executionSourceLabel}
+          </span>
+          <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${getSyncBadgeClass(syncState.status)}`}>
+            {syncState.status}
+          </span>
           {symbolProfile.category === "Crypto" ? (
             <>
               <span className="rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-200">
@@ -677,6 +692,7 @@ export function GoldChart({
       </div>
 
       <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
+        {syncState.status !== "SYNC OK" ? <SyncWarning syncState={syncState} /> : null}
         <div ref={containerRef} className="h-full w-full" />
         {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
         {orderBlockOverlay ? (
@@ -896,6 +912,24 @@ function ScalpStatus({ active, label, value }: { active: boolean; label: string;
     <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-3 py-2">
       <span className="text-slate-500">{label}</span>
       <span className={`truncate text-right font-mono font-semibold ${active ? "text-emerald-300" : "text-slate-300"}`}>{value}</span>
+    </div>
+  );
+}
+
+function SyncWarning({
+  syncState,
+}: {
+  syncState: {
+    message: string;
+    priceWarning: string | null;
+    status: "SYNC OK" | "PARTIAL SYNC" | "NOT SYNCED";
+  };
+}) {
+  return (
+    <div className="pointer-events-none absolute left-3 right-3 top-3 z-30 rounded-md border border-rose-300/30 bg-[#1f0b12]/90 px-3 py-2 shadow-[0_14px_45px_rgba(0,0,0,0.45)] backdrop-blur">
+      <p className="text-[10px] font-black uppercase tracking-[0.16em] text-rose-100">{syncState.status}</p>
+      <p className="mt-1 text-xs font-semibold leading-5 text-white">{syncState.message}</p>
+      {syncState.priceWarning ? <p className="mt-1 text-[11px] leading-4 text-rose-100">{syncState.priceWarning}</p> : null}
     </div>
   );
 }
@@ -1220,6 +1254,27 @@ function formatUtcTime(value?: number) {
     minute: "2-digit",
     timeZone: "UTC",
   }) + " UTC";
+}
+
+function getSyncBadgeClass(status: "SYNC OK" | "PARTIAL SYNC" | "NOT SYNCED") {
+  if (status === "SYNC OK") {
+    return "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";
+  }
+
+  if (status === "PARTIAL SYNC") {
+    return "border-amber-300/25 bg-amber-300/10 text-amber-100";
+  }
+
+  return "border-rose-300/25 bg-rose-300/10 text-rose-100";
+}
+
+function isExnessSource(source: string | null | undefined) {
+  if (!source) {
+    return false;
+  }
+
+  const normalized = source.toLowerCase();
+  return normalized.includes("mt5") || normalized.includes("exness") || normalized.includes("bridge");
 }
 
 function getTradingViewFallbackSymbol(symbol: string) {

@@ -66,6 +66,7 @@ export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
 }
 
 export function buildLiveTimeframeAnalyses({
+  analysisSource = null,
   candleMap,
   fundamental,
   macro,
@@ -79,6 +80,7 @@ export function buildLiveTimeframeAnalyses({
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
+  analysisSource?: string | null;
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
   macro: MacroContext;
@@ -121,6 +123,7 @@ export function buildLiveTimeframeAnalyses({
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
     const decision = evaluateSignal({
       analysis,
+      analysisSource,
       candles,
       conservativeScore: scoring.total,
       direction,
@@ -166,6 +169,7 @@ export function buildLiveTimeframeAnalyses({
 }
 
 export function buildLiveTradePlan({
+  analysisSource = null,
   candleMap,
   fundamental,
   macro,
@@ -180,6 +184,7 @@ export function buildLiveTradePlan({
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
+  analysisSource?: string | null;
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
   macro: MacroContext;
@@ -249,6 +254,7 @@ export function buildLiveTradePlan({
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
   const decision = evaluateSignal({
     analysis,
+    analysisSource,
     candles,
     conservativeScore: scoring.total,
     direction,
@@ -310,6 +316,7 @@ export function buildLiveTradePlan({
 
 function evaluateSignal({
   analysis,
+  analysisSource,
   candles,
   conservativeScore,
   direction,
@@ -325,6 +332,7 @@ function evaluateSignal({
   timeframe,
 }: {
   analysis: TechnicalAnalysis;
+  analysisSource: string | null;
   candles: Candle[];
   conservativeScore: number;
   direction: Direction;
@@ -343,6 +351,16 @@ function evaluateSignal({
 
   if (symbolProfile.symbol !== "XAUUSD") {
     const engineDecision = engine.evaluateEducationalDecision({ analysis, direction, redNewsNearby, riskReward, spread });
+
+    if (isCryptoScalpingUnsynced(symbolProfile, analysisSource) && isActionableSignal(engineDecision.signal)) {
+      return {
+        confidence: Math.min(engineDecision.confidence, 49),
+        missingConditions: ["Exness/MT5 Bridge sync"],
+        signal: "WAIT",
+        waitReason: "NOT SYNCED: external crypto price may differ from Exness, scalping disabled",
+      };
+    }
+
     return {
       confidence: engineDecision.confidence,
       missingConditions: engineDecision.missingConditions,
@@ -356,6 +374,23 @@ function evaluateSignal({
   }
 
   return evaluateConservativeSignal({ analysis, conservativeScore, direction, fundamental, news, redNewsNearby, riskReward });
+}
+
+function isActionableSignal(signal: Signal) {
+  return signal === "BUY" || signal === "SELL" || signal === "BUY SCALP READY" || signal === "SELL SCALP READY" || signal === "STRONG BUY" || signal === "STRONG SELL";
+}
+
+function isCryptoScalpingUnsynced(symbolProfile: SymbolProfile, analysisSource: string | null) {
+  return isTradingViewCryptoVisualProfile(symbolProfile) && !isExnessExecutionSource(analysisSource);
+}
+
+function isExnessExecutionSource(source: string | null) {
+  if (!source) {
+    return false;
+  }
+
+  const normalized = source.toLowerCase();
+  return normalized.includes("mt5") || normalized.includes("exness") || normalized.includes("bridge");
 }
 
 function evaluateConservativeSignal({

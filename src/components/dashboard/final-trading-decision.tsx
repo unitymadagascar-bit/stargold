@@ -9,14 +9,20 @@ interface FinalTradingDecisionProps {
   activeTimeframe: Timeframe;
   analysisSourceLabel?: string;
   chartSourceLabel?: string;
+  executionSourceLabel?: string;
   fundamental: FundamentalContext;
   plan: TradePlan;
+  syncState?: {
+    message: string;
+    priceWarning: string | null;
+    status: "SYNC OK" | "PARTIAL SYNC" | "NOT SYNCED";
+  };
 }
 
 type CheckStatus = "yes" | "wait" | "no";
 type DirectionTone = "buy" | "sell" | "wait";
 
-export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysisSourceLabel, chartSourceLabel, fundamental, plan }: FinalTradingDecisionProps) {
+export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysisSourceLabel, chartSourceLabel, executionSourceLabel, fundamental, plan, syncState }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
   const tone = getSignalTone(final.signal);
   const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL" || final.signal === "ORB BREAKOUT WATCH" || final.signal === "FVG RETEST WATCH";
@@ -32,6 +38,8 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
           <div className="flex items-center gap-2">
             {chartSourceLabel ? <SourceBadge label={`Source graphique : ${chartSourceLabel}`} tone={chartSourceLabel.includes("TradingView") ? "blue" : "green"} /> : null}
             {analysisSourceLabel ? <SourceBadge label={`Source analyse : ${analysisSourceLabel}`} tone={analysisSourceLabel.includes("visual") ? "violet" : "green"} /> : null}
+            {executionSourceLabel ? <SourceBadge label={`Source execution : ${executionSourceLabel}`} tone={executionSourceLabel.includes("non connecte") ? "red" : "green"} /> : null}
+            {syncState ? <SourceBadge label={syncState.status} tone={syncState.status === "SYNC OK" ? "green" : syncState.status === "PARTIAL SYNC" ? "amber" : "red"} /> : null}
             <SignalBadge signal={final.signal} />
             <span className={`rounded-md border px-2.5 py-1 font-mono text-xs font-bold ${tone.badge}`}>{final.confidence}%</span>
           </div>
@@ -46,6 +54,13 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
           <p className="mt-2 text-xs leading-5 text-slate-400">Le sens indique le scenario a surveiller. L'entree reste bloquee tant que la confirmation n'est pas presente.</p>
         </div>
       </div>
+
+      {syncState && syncState.status !== "SYNC OK" ? (
+        <div className="border-b border-rose-300/20 bg-rose-300/10 px-4 py-3">
+          <p className="text-sm font-bold text-rose-100">{syncState.message}</p>
+          {syncState.priceWarning ? <p className="mt-1 text-xs leading-5 text-rose-100">{syncState.priceWarning}</p> : null}
+        </div>
+      ) : null}
 
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -98,10 +113,14 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
   );
 }
 
-function SourceBadge({ label, tone }: { label: string; tone: "blue" | "green" | "violet" }) {
+function SourceBadge({ label, tone }: { label: string; tone: "amber" | "blue" | "green" | "red" | "violet" }) {
   const classes =
     tone === "blue"
       ? "border-sky-300/25 bg-sky-300/10 text-sky-100"
+      : tone === "amber"
+        ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+        : tone === "red"
+          ? "border-rose-300/25 bg-rose-300/10 text-rose-100"
       : tone === "violet"
         ? "border-violet-300/25 bg-violet-300/10 text-violet-100"
         : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";

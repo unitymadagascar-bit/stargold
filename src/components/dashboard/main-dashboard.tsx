@@ -50,13 +50,20 @@ export function MainDashboard() {
   const [notificationStatus, setNotificationStatus] = useState("Checking browser notification support...");
   const lastAlertRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
+  const exnessSourceConfirmed = isExnessSource(live.source);
+  const hasCryptoOhlcFeed = symbolProfile.category === "Crypto" && Object.values(live.candleMap).some((candles) => candles.length >= 30);
+  const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol);
+  const chartSourceLabel = cryptoTradingViewMode && !exnessSourceConfirmed ? "TradingView Crypto" : "MT5 Bridge";
+  const analysisSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "Crypto OHLC Feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
+  const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
+  const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
-    [fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
+    [fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -65,10 +72,6 @@ export function MainDashboard() {
   const previousCandle = activeCandles.at(-2) ?? null;
   const priceChange = latestCandle && previousCandle ? latestCandle.close - previousCandle.close : 0;
   const priceChangePercent = previousCandle?.close ? (priceChange / previousCandle.close) * 100 : 0;
-  const hasCryptoOhlcFeed = symbolProfile.category === "Crypto" && Object.values(live.candleMap).some((candles) => candles.length >= 30);
-  const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol);
-  const chartSourceLabel = cryptoTradingViewMode ? "TradingView Crypto" : "MT5 Bridge";
-  const analysisSourceLabel = symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "Crypto OHLC Feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
   const handleSignalModeChange = (mode: SignalMode) => {
     setSignalMode(mode);
     if (mode === "scalping" && activeTimeframe !== "M1" && activeTimeframe !== "M5") {
@@ -165,7 +168,7 @@ export function MainDashboard() {
         <MacroPanel fundamental={fundamentals.fundamental} liveMessage={live.message} plan={plan} spread={spread} symbolProfile={symbolProfile} />
       </section>
 
-      <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} analysisSourceLabel={analysisSourceLabel} chartSourceLabel={chartSourceLabel} fundamental={fundamentals.fundamental} plan={plan} />
+      <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} analysisSourceLabel={analysisSourceLabel} chartSourceLabel={chartSourceLabel} executionSourceLabel={executionSourceLabel} fundamental={fundamentals.fundamental} plan={plan} syncState={syncState} />
 
       <section className="mt-3">
         <TimeframeGrid activeTimeframe={activeTimeframe} analyses={timeframeAnalyses} onTimeframeChange={setActiveTimeframe} />
@@ -180,12 +183,14 @@ export function MainDashboard() {
             connectionMessage={live.message}
             connectionSource={live.source}
             connectionStatus={live.status}
+            executionSourceLabel={executionSourceLabel}
             lastTick={live.lastTick}
             orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock}
             fvg={activeAnalysis?.fvg ?? plan.fvg}
             orb={activeAnalysis?.orb ?? plan.orb}
             plan={plan}
             symbolProfile={symbolProfile}
+            syncState={syncState}
             timeframe={activeTimeframe}
             onTimeframeChange={setActiveTimeframe}
           />
@@ -973,6 +978,62 @@ function isTradingViewCryptoSymbol(symbol: string) {
   return normalized === "BTCUSD" || normalized === "BTCUSDT" || normalized === "ETHUSD" || normalized === "ETHUSDT";
 }
 
+function isExnessSource(source: string | null | undefined) {
+  if (!source) {
+    return false;
+  }
+
+  const normalized = source.toLowerCase();
+  return normalized.includes("mt5") || normalized.includes("exness") || normalized.includes("bridge");
+}
+
+function getSyncState({
+  analysisSourceLabel,
+  chartSourceLabel,
+  executionSourceLabel,
+  liveSource,
+  symbolProfile,
+}: {
+  analysisSourceLabel: string;
+  chartSourceLabel: string;
+  executionSourceLabel: string;
+  liveSource: string | null;
+  symbolProfile: SymbolProfile;
+}): SyncState {
+  const crypto = isTradingViewCryptoSymbol(symbolProfile.symbol);
+  const exnessConfirmed = isExnessSource(liveSource);
+
+  if (!crypto) {
+    return {
+      message: exnessConfirmed ? "Graphique, analyse et execution sont alignes sur le bridge MT5." : "En attente de confirmation Exness/MT5 Bridge.",
+      priceWarning: null,
+      status: exnessConfirmed ? "SYNC OK" : "PARTIAL SYNC",
+    };
+  }
+
+  if (exnessConfirmed && analysisSourceLabel.includes("MT5")) {
+    return {
+      message: "BTC/ETH synchronise avec Exness/MT5 Bridge. Le scalping peut utiliser les niveaux calcules.",
+      priceWarning: null,
+      status: "SYNC OK",
+    };
+  }
+
+  if (analysisSourceLabel === "Crypto OHLC Feed") {
+    return {
+      message: "Attention : le prix de l'analyse ne correspond pas exactement au prix Exness. Le scalping est desactive jusqu'a synchronisation.",
+      priceWarning: `${symbolProfile.symbol}: prix indicatif externe, peut differer d'Exness. Alerte ecart: BTCUSD > 10-20 USD, ETHUSD > 2-5 USD.`,
+      status: "NOT SYNCED",
+    };
+  }
+
+  return {
+    message: chartSourceLabel.includes("TradingView") ? "Graphique alternatif actif, mais analyse limitee sans source Exness confirmee." : `Source execution: ${executionSourceLabel}.`,
+    priceWarning: "Attention : le prix de l'analyse ne correspond pas exactement au prix Exness. Le scalping est desactive jusqu'a synchronisation.",
+    status: "PARTIAL SYNC",
+  };
+}
+
 function formatAlertTime(value: number) {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
@@ -1183,6 +1244,12 @@ interface AlertHistoryItem {
   signal: Signal;
   symbol: string;
   time: number;
+}
+
+export interface SyncState {
+  message: string;
+  priceWarning: string | null;
+  status: "SYNC OK" | "PARTIAL SYNC" | "NOT SYNCED";
 }
 
 interface TradingAlertCandidate {

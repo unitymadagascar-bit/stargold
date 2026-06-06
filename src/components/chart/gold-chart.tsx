@@ -81,7 +81,7 @@ export function GoldChart({
   const candles = candleMap[timeframe];
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
-  const [fvgOverlay, setFvgOverlay] = useState<OrderBlockOverlay | null>(null);
+  const [fvgOverlay, setFvgOverlay] = useState<ZoneOverlay | null>(null);
   const [riskRewardOverlay, setRiskRewardOverlay] = useState<RiskRewardOverlay | null>(null);
   const [riskRewardNotice, setRiskRewardNotice] = useState<string | null>(null);
   const [fallbackDelayElapsed, setFallbackDelayElapsed] = useState(false);
@@ -438,13 +438,39 @@ export function GoldChart({
       }
 
       const bullish = activeOrderBlock.direction === "bullish";
+      const entry = Number.isFinite(plan.entry) && plan.entry > 0 ? series.priceToCoordinate(plan.entry) : null;
+      const sl = Number.isFinite(plan.stopLoss) && plan.stopLoss > 0 ? series.priceToCoordinate(plan.stopLoss) : null;
+      const tp1 = Number.isFinite(plan.takeProfits[0]) && plan.takeProfits[0] > 0 ? series.priceToCoordinate(plan.takeProfits[0]) : null;
+      const tp2 = Number.isFinite(plan.takeProfits[1]) && plan.takeProfits[1] > 0 ? series.priceToCoordinate(plan.takeProfits[1]) : null;
+      const poi = series.priceToCoordinate((activeOrderBlock.high + activeOrderBlock.low) / 2);
+      const latest = latestCandleRef.current;
+      const structuralHigh = candles.length ? series.priceToCoordinate(Math.max(...candles.slice(-80).map((candle) => candle.high))) : null;
+      const structuralLow = candles.length ? series.priceToCoordinate(Math.min(...candles.slice(-80).map((candle) => candle.low))) : null;
+      const hasTradePlan =
+        plan.decision !== "WAIT" &&
+        plan.direction !== "Neutral" &&
+        entry !== null &&
+        sl !== null &&
+        tp1 !== null &&
+        ((bullish && plan.stopLoss < plan.entry && plan.takeProfits[0] > plan.entry) || (!bullish && plan.stopLoss > plan.entry && plan.takeProfits[0] < plan.entry));
 
       setOrderBlockOverlay({
         top: Math.min(high, low),
         height: Math.max(4, Math.abs(low - high)),
         background: bullish ? "rgba(34, 197, 94, 0.12)" : "rgba(239, 68, 68, 0.12)",
         border: bullish ? "rgba(34, 197, 94, 0.55)" : "rgba(239, 68, 68, 0.55)",
+        direction: activeOrderBlock.direction,
+        entry: hasTradePlan && entry !== null ? { price: plan.entry, y: entry } : null,
+        inducementY: bullish ? structuralLow : structuralHigh,
         label: `${bullish ? "Bullish" : "Bearish"} OB ${activeOrderBlock.score}/100 - ${activeOrderBlock.strength}`,
+        poiY: poi,
+        sl: hasTradePlan && sl !== null ? { price: plan.stopLoss, y: sl } : null,
+        structureLabel: activeOrderBlock.bosConfirmed ? "BOS" : "CHoCH",
+        structureY: bullish ? structuralHigh : structuralLow,
+        touched: activeOrderBlock.touched,
+        tp1: hasTradePlan && tp1 !== null ? { price: plan.takeProfits[0], y: tp1 } : null,
+        tp2: hasTradePlan && tp2 !== null ? { price: plan.takeProfits[1], y: tp2 } : null,
+        triggerLabel: latest ? (bullish ? "BUY entry zone" : "SELL entry zone") : "Entry zone",
       });
     };
 
@@ -454,7 +480,7 @@ export function GoldChart({
     return () => {
       chartRef.current?.unsubscribeCrosshairMove(updateOverlay);
     };
-  }, [candles.length, displaySettings.showOrderBlocks, orderBlock, plan.orderBlock, timeframe]);
+  }, [candles, displaySettings.showOrderBlocks, orderBlock, plan.decision, plan.direction, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits, timeframe]);
 
   useEffect(() => {
     const series = seriesRef.current;
@@ -695,24 +721,7 @@ export function GoldChart({
         {syncState.status !== "SYNC OK" ? <SyncWarning syncState={syncState} /> : null}
         <div ref={containerRef} className="h-full w-full" />
         {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
-        {orderBlockOverlay ? (
-          <div
-            className="pointer-events-none absolute inset-x-0 z-10 border-y"
-            style={{
-              top: orderBlockOverlay.top,
-              height: orderBlockOverlay.height,
-              background: orderBlockOverlay.background,
-              borderColor: orderBlockOverlay.border,
-            }}
-          >
-            <span
-              className="absolute right-2 top-1 rounded px-2 py-0.5 font-mono text-[10px] font-semibold text-white shadow-lg"
-              style={{ background: orderBlockOverlay.border }}
-            >
-              {orderBlockOverlay.label}
-            </span>
-          </div>
-        ) : null}
+        {orderBlockOverlay ? <OrderBlockSchematic overlay={orderBlockOverlay} /> : null}
         {fvgOverlay ? (
           <div
             className="pointer-events-none absolute inset-x-0 z-10 border-y"
@@ -912,6 +921,91 @@ function ScalpStatus({ active, label, value }: { active: boolean; label: string;
     <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-3 py-2">
       <span className="text-slate-500">{label}</span>
       <span className={`truncate text-right font-mono font-semibold ${active ? "text-emerald-300" : "text-slate-300"}`}>{value}</span>
+    </div>
+  );
+}
+
+function OrderBlockSchematic({ overlay }: { overlay: OrderBlockOverlay }) {
+  const bullish = overlay.direction === "bullish";
+  const accent = bullish ? "rgba(168, 85, 247, 0.78)" : "rgba(249, 115, 22, 0.78)";
+  const fill = bullish ? "rgba(168, 85, 247, 0.34)" : "rgba(249, 115, 22, 0.28)";
+  const entry = overlay.entry;
+  const hasPlan = Boolean(entry && overlay.sl && overlay.tp1);
+  const planTop = Math.min(entry?.y ?? overlay.top, overlay.sl?.y ?? overlay.top, overlay.tp2?.y ?? overlay.tp1?.y ?? overlay.top);
+  const planBottom = Math.max(entry?.y ?? overlay.top, overlay.sl?.y ?? overlay.top, overlay.tp2?.y ?? overlay.tp1?.y ?? overlay.top);
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-20">
+      {overlay.structureY !== null ? (
+        <StructureLine label={overlay.structureLabel} top={overlay.structureY} />
+      ) : null}
+      {overlay.inducementY !== null ? (
+        <StructureLine label="Inducement / liquidity" muted top={overlay.inducementY} />
+      ) : null}
+
+      <div
+        className="absolute left-[8%] right-[12%] rounded-sm border-y-2 shadow-[0_12px_35px_rgba(0,0,0,0.28)]"
+        style={{
+          top: overlay.top,
+          height: overlay.height,
+          background: fill,
+          borderColor: accent,
+        }}
+      >
+        <span className="absolute left-2 top-1 rounded bg-black/70 px-2 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white shadow-lg">
+          Order Block
+        </span>
+        <span className="absolute right-2 top-1 rounded px-2 py-1 font-mono text-[10px] font-bold text-white shadow-lg" style={{ background: accent }}>
+          {overlay.label}
+        </span>
+        {overlay.poiY !== null ? (
+          <div className="absolute left-0 right-0 border-t border-dashed border-white/55" style={{ top: overlay.poiY - overlay.top }}>
+            <span className="absolute left-[45%] -top-3 rounded bg-black/65 px-2 py-0.5 text-[10px] font-semibold text-slate-100">POI</span>
+          </div>
+        ) : null}
+        {overlay.touched ? (
+          <span className="absolute bottom-1 left-2 rounded border border-emerald-300/25 bg-emerald-300/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-100">
+            retest touched
+          </span>
+        ) : null}
+      </div>
+
+      {hasPlan ? (
+        <div className="absolute right-[4%] w-[30%] min-w-[190px] max-w-[330px]" style={{ top: Math.max(4, planTop), height: Math.max(36, planBottom - planTop) }}>
+          {overlay.tp2 ? <TradePlanLine color="bg-emerald-400" label={`TP2 ${formatPrice(overlay.tp2.price)}`} top={overlay.tp2.y - planTop} /> : null}
+          {overlay.tp1 ? <TradePlanLine color="bg-emerald-300" label={`TP1 ${formatPrice(overlay.tp1.price)}`} top={overlay.tp1.y - planTop} /> : null}
+          {overlay.entry ? <TradePlanLine color="bg-amber-200" label={`Entry ${formatPrice(overlay.entry.price)}`} top={overlay.entry.y - planTop} /> : null}
+          {overlay.sl ? <TradePlanLine color="bg-rose-300" label={`SL ${formatPrice(overlay.sl.price)}`} top={overlay.sl.y - planTop} /> : null}
+          <div
+            className={`absolute right-full mr-2 h-px w-16 ${bullish ? "bg-emerald-300" : "bg-rose-300"}`}
+            style={{ top: Math.max(0, (overlay.entry?.y ?? planTop) - planTop) }}
+          >
+            <span className={`absolute -top-3 ${bullish ? "right-full" : "left-full"} rounded bg-black/75 px-2 py-0.5 text-[10px] font-bold text-white shadow-lg`}>
+              {overlay.triggerLabel}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function StructureLine({ label, muted, top }: { label: string; muted?: boolean; top: number }) {
+  return (
+    <div className="absolute left-[8%] right-[12%]" style={{ top }}>
+      <div className={`border-t ${muted ? "border-dashed border-slate-200/35" : "border-solid border-slate-100/65"}`} />
+      <span className={`absolute left-1/2 -top-3 -translate-x-1/2 rounded bg-black/70 px-2 py-0.5 text-[10px] font-semibold shadow-lg ${muted ? "text-slate-300" : "text-white"}`}>
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function TradePlanLine({ color, label, top }: { color: string; label: string; top: number }) {
+  return (
+    <div className="absolute left-0 right-0" style={{ top }}>
+      <div className={`h-px ${color}`} />
+      <span className="absolute right-0 top-1 rounded bg-black/75 px-2 py-0.5 font-mono text-[10px] font-semibold text-white shadow-lg">{label}</span>
     </div>
   );
 }
@@ -1173,6 +1267,25 @@ function RiskRewardLine({ color, label, top }: { color: string; label: string; t
 }
 
 interface OrderBlockOverlay {
+  background: string;
+  border: string;
+  direction: "bullish" | "bearish";
+  entry: { price: number; y: number } | null;
+  height: number;
+  inducementY: number | null;
+  label: string;
+  poiY: number | null;
+  sl: { price: number; y: number } | null;
+  structureLabel: string;
+  structureY: number | null;
+  top: number;
+  touched: boolean;
+  tp1: { price: number; y: number } | null;
+  tp2: { price: number; y: number } | null;
+  triggerLabel: string;
+}
+
+interface ZoneOverlay {
   top: number;
   height: number;
   background: string;

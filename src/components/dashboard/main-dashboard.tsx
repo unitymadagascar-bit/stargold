@@ -150,7 +150,7 @@ export function MainDashboard() {
   }
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-[1340px] px-3 py-3 sm:px-4 lg:px-5">
+    <main className="mx-auto min-h-screen w-full max-w-[1780px] px-3 py-3 sm:px-4 lg:px-5">
       <BrandHeader />
       <SymbolSelector profile={symbolProfile} selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
       <Mt5ConnectionHeader live={live} spread={spread} />
@@ -176,7 +176,7 @@ export function MainDashboard() {
 
       <Disclaimer />
 
-      <section className="mt-3 grid gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+      <section className="mt-3 grid gap-3 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)_280px] 2xl:grid-cols-[340px_minmax(760px,1fr)_360px]">
         <aside className="order-2 space-y-3 lg:order-1">
           <SignalModePanel
             activeAnalysis={activeAnalysis}
@@ -203,21 +203,7 @@ export function MainDashboard() {
             settings={alertSettings}
             symbol={symbolProfile.symbol}
           />
-          <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
           <TradeChecklist />
-          <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
-          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} symbol={symbolProfile.symbol} />
-          <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
-          <FundamentalPanel
-            apiError={fundamentals.apiError}
-            fundamental={fundamentals.fundamental}
-            manualEvents={fundamentals.manualEvents}
-            onAddManualEvent={fundamentals.addManualEvent}
-            onImportManualEvents={fundamentals.importManualEvents}
-            onRemoveManualEvent={fundamentals.removeManualEvent}
-            onUpdateDxy={fundamentals.updateDxy}
-          />
-          <RiskPanel plan={plan} />
         </aside>
 
         <div className="order-1 space-y-3 lg:order-2">
@@ -238,7 +224,7 @@ export function MainDashboard() {
             onTimeframeChange={setActiveTimeframe}
           />
 
-          <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
             <ExecutionBlock title="Zones cles" icon={<Activity size={18} />}>
               <BlockRow label="Support proche" value={formatPrice(activeAnalysis?.support)} />
               <BlockRow label="Resistance proche" value={formatPrice(activeAnalysis?.resistance)} />
@@ -265,6 +251,23 @@ export function MainDashboard() {
             </ExecutionBlock>
           </section>
         </div>
+
+        <aside className="order-3 space-y-3 lg:col-span-2 xl:col-span-1">
+          <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
+          <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
+          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} symbol={symbolProfile.symbol} />
+          <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
+          <FundamentalPanel
+            apiError={fundamentals.apiError}
+            fundamental={fundamentals.fundamental}
+            manualEvents={fundamentals.manualEvents}
+            onAddManualEvent={fundamentals.addManualEvent}
+            onImportManualEvents={fundamentals.importManualEvents}
+            onRemoveManualEvent={fundamentals.removeManualEvent}
+            onUpdateDxy={fundamentals.updateDxy}
+          />
+          <RiskPanel plan={plan} />
+        </aside>
       </section>
     </main>
   );

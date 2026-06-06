@@ -176,8 +176,51 @@ export function MainDashboard() {
 
       <Disclaimer />
 
-      <section className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="space-y-3">
+      <section className="mt-3 grid gap-3 lg:grid-cols-[360px_minmax(0,1fr)]">
+        <aside className="order-2 space-y-3 lg:order-1">
+          <SignalModePanel
+            activeAnalysis={activeAnalysis}
+            mode={signalMode}
+            movingAveragePeriod={movingAveragePeriod}
+            movingAverageType={movingAverageType}
+            onModeChange={handleSignalModeChange}
+            onMovingAveragePeriodChange={setMovingAveragePeriod}
+            onMovingAverageTypeChange={setMovingAverageType}
+            onOrbDurationChange={setOrbDuration}
+            onOrbRequireRetestChange={setOrbRequireRetest}
+            onSensitivityChange={setScalpingSensitivity}
+            orbDuration={orbDuration}
+            orbRequireRetest={orbRequireRetest}
+            plan={plan}
+            sensitivity={scalpingSensitivity}
+          />
+          <TradingAlertsPanel
+            history={alertHistory}
+            notificationStatus={notificationStatus}
+            onRequestPermission={requestNotificationPermission}
+            onSettingsChange={setAlertSettings}
+            onTestSound={playAlertSound}
+            settings={alertSettings}
+            symbol={symbolProfile.symbol}
+          />
+          <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
+          <TradeChecklist />
+          <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
+          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} symbol={symbolProfile.symbol} />
+          <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
+          <FundamentalPanel
+            apiError={fundamentals.apiError}
+            fundamental={fundamentals.fundamental}
+            manualEvents={fundamentals.manualEvents}
+            onAddManualEvent={fundamentals.addManualEvent}
+            onImportManualEvents={fundamentals.importManualEvents}
+            onRemoveManualEvent={fundamentals.removeManualEvent}
+            onUpdateDxy={fundamentals.updateDxy}
+          />
+          <RiskPanel plan={plan} />
+        </aside>
+
+        <div className="order-1 space-y-3 lg:order-2">
           <GoldChart
             candleMap={live.candleMap}
             connectionMessage={live.message}
@@ -222,49 +265,6 @@ export function MainDashboard() {
             </ExecutionBlock>
           </section>
         </div>
-
-        <aside className="space-y-3">
-          <SignalModePanel
-            activeAnalysis={activeAnalysis}
-            mode={signalMode}
-            movingAveragePeriod={movingAveragePeriod}
-            movingAverageType={movingAverageType}
-            onModeChange={handleSignalModeChange}
-            onMovingAveragePeriodChange={setMovingAveragePeriod}
-            onMovingAverageTypeChange={setMovingAverageType}
-            onOrbDurationChange={setOrbDuration}
-            onOrbRequireRetestChange={setOrbRequireRetest}
-            onSensitivityChange={setScalpingSensitivity}
-            orbDuration={orbDuration}
-            orbRequireRetest={orbRequireRetest}
-            plan={plan}
-            sensitivity={scalpingSensitivity}
-          />
-          <TradingAlertsPanel
-            history={alertHistory}
-            notificationStatus={notificationStatus}
-            onRequestPermission={requestNotificationPermission}
-            onSettingsChange={setAlertSettings}
-            onTestSound={playAlertSound}
-            settings={alertSettings}
-            symbol={symbolProfile.symbol}
-          />
-          <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
-          <TradeChecklist />
-          <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
-          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} symbol={symbolProfile.symbol} />
-          <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
-          <FundamentalPanel
-            apiError={fundamentals.apiError}
-            fundamental={fundamentals.fundamental}
-            manualEvents={fundamentals.manualEvents}
-            onAddManualEvent={fundamentals.addManualEvent}
-            onImportManualEvents={fundamentals.importManualEvents}
-            onRemoveManualEvent={fundamentals.removeManualEvent}
-            onUpdateDxy={fundamentals.updateDxy}
-          />
-          <RiskPanel plan={plan} />
-        </aside>
       </section>
     </main>
   );

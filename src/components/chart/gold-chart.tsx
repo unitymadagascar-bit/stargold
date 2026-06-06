@@ -123,7 +123,14 @@ export function GoldChart({
   const tradingViewSymbol = getTradingViewFallbackSymbol(symbolProfile.symbol);
   const showTradingViewFallback = Boolean(displaySettings.showEmptyHelper && !candles.length && fallbackDelayElapsed && tradingViewSymbol);
   const marketClosed = Boolean(displaySettings.showEmptyHelper && !candles.length && !showTradingViewFallback && isLikelyWeekendClosed(symbolProfile.category));
-  const chartSourceLabel = showTradingViewFallback ? "TradingView fallback" : "MT5 Bridge";
+  const chartSourceLabel = showTradingViewFallback ? "TradingView Crypto" : "MT5 Bridge";
+  const analysisSourceLabel = showTradingViewFallback
+    ? "TradingView visual mode"
+    : symbolProfile.category === "Crypto"
+      ? candles.length
+        ? "OHLC crypto feed"
+        : "TradingView visual mode"
+      : "MT5 Bridge OHLC";
   const fallbackHint =
     showTradingViewFallback && connectionSource
       ? `MT5 indisponible pour ${symbolProfile.symbol}. Derniere source app: ${connectionSource}.`
@@ -632,6 +639,9 @@ export function GoldChart({
           <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${showTradingViewFallback ? "border-sky-300/25 bg-sky-300/10 text-sky-100" : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"}`}>
             Source graphique : {chartSourceLabel}
           </span>
+          <span className="rounded border border-violet-300/25 bg-violet-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100">
+            Source analyse : {analysisSourceLabel}
+          </span>
         </div>
         <button
           className="inline-flex h-8 items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
@@ -889,10 +899,11 @@ function TradingViewFallbackChart({
         title={`TradingView fallback ${symbolProfile.symbol}`}
       />
       <div className="pointer-events-none absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-sky-300/25 bg-[#07111f]/90 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView fallback</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView Crypto</p>
         <p className="mt-1 text-xs leading-5 text-slate-200">
-          {symbol} live pour {symbolProfile.symbol}. Les signaux scalping avances restent WAIT tant que les bougies MT5 ne confirment pas.
+          Mode Crypto actif via TradingView fallback. Les signaux sont bases sur la source crypto disponible et restent educatifs/probabilistes.
         </p>
+        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100">Source analyse : TradingView visual mode</p>
         <p className="mt-1 text-[11px] leading-4 text-slate-400">{fallbackHint}</p>
       </div>
     </div>

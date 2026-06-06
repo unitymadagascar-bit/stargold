@@ -7,6 +7,8 @@ import { SignalBadge } from "@/components/ui/signal-badge";
 interface FinalTradingDecisionProps {
   activeAnalysis?: TimeframeAnalysis;
   activeTimeframe: Timeframe;
+  analysisSourceLabel?: string;
+  chartSourceLabel?: string;
   fundamental: FundamentalContext;
   plan: TradePlan;
 }
@@ -14,7 +16,7 @@ interface FinalTradingDecisionProps {
 type CheckStatus = "yes" | "wait" | "no";
 type DirectionTone = "buy" | "sell" | "wait";
 
-export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamental, plan }: FinalTradingDecisionProps) {
+export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysisSourceLabel, chartSourceLabel, fundamental, plan }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
   const tone = getSignalTone(final.signal);
   const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL" || final.signal === "ORB BREAKOUT WATCH" || final.signal === "FVG RETEST WATCH";
@@ -28,6 +30,8 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
             <h2 className="mt-1 text-xl font-black text-white">Plan simple avant execution</h2>
           </div>
           <div className="flex items-center gap-2">
+            {chartSourceLabel ? <SourceBadge label={`Source graphique : ${chartSourceLabel}`} tone={chartSourceLabel.includes("TradingView") ? "blue" : "green"} /> : null}
+            {analysisSourceLabel ? <SourceBadge label={`Source analyse : ${analysisSourceLabel}`} tone={analysisSourceLabel.includes("visual") ? "violet" : "green"} /> : null}
             <SignalBadge signal={final.signal} />
             <span className={`rounded-md border px-2.5 py-1 font-mono text-xs font-bold ${tone.badge}`}>{final.confidence}%</span>
           </div>
@@ -92,6 +96,17 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, fundamen
       </div>
     </section>
   );
+}
+
+function SourceBadge({ label, tone }: { label: string; tone: "blue" | "green" | "violet" }) {
+  const classes =
+    tone === "blue"
+      ? "border-sky-300/25 bg-sky-300/10 text-sky-100"
+      : tone === "violet"
+        ? "border-violet-300/25 bg-violet-300/10 text-violet-100"
+        : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100";
+
+  return <span className={`rounded-md border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ${classes}`}>{label}</span>;
 }
 
 function getFinalDecision({
@@ -444,6 +459,7 @@ function translateMissingCondition(condition: string) {
     "Micro BOS/CHoCH": "Wait for a micro BOS/CHoCH.",
     "Quick rejection candle": "Wait for a rejection candle.",
     "Live MT5 candles": "Wait for live candles from MT5 or fallback market feed.",
+    "OHLC crypto feed": "TradingView affiche le marche en mode visuel; active un flux OHLC crypto interne pour calculer automatiquement BUY / SELL / WAIT.",
     "Clear M1/M5 micro direction": "Wait for M1/M5 to show a clear buy or sell micro direction.",
     "Entry confirmation: rejection candle, micro BOS/CHoCH, or momentum from zone": "Wait for a rejection candle, micro BOS/CHoCH, or momentum from the zone.",
     "ATR acceptable": "Wait for ATR/volatility to become tradable.",

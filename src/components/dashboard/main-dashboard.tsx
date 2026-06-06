@@ -65,6 +65,10 @@ export function MainDashboard() {
   const previousCandle = activeCandles.at(-2) ?? null;
   const priceChange = latestCandle && previousCandle ? latestCandle.close - previousCandle.close : 0;
   const priceChangePercent = previousCandle?.close ? (priceChange / previousCandle.close) * 100 : 0;
+  const hasCryptoOhlcFeed = symbolProfile.category === "Crypto" && Object.values(live.candleMap).some((candles) => candles.length >= 30);
+  const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol) && !hasCryptoOhlcFeed && live.status !== "live";
+  const chartSourceLabel = cryptoTradingViewMode ? "TradingView Crypto" : "MT5 Bridge";
+  const analysisSourceLabel = symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "OHLC crypto feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
   const handleSignalModeChange = (mode: SignalMode) => {
     setSignalMode(mode);
     if (mode === "scalping" && activeTimeframe !== "M1" && activeTimeframe !== "M5") {
@@ -161,7 +165,7 @@ export function MainDashboard() {
         <MacroPanel fundamental={fundamentals.fundamental} liveMessage={live.message} plan={plan} spread={spread} symbolProfile={symbolProfile} />
       </section>
 
-      <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} fundamental={fundamentals.fundamental} plan={plan} />
+      <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} analysisSourceLabel={analysisSourceLabel} chartSourceLabel={chartSourceLabel} fundamental={fundamentals.fundamental} plan={plan} />
 
       <section className="mt-3">
         <TimeframeGrid activeTimeframe={activeTimeframe} analyses={timeframeAnalyses} onTimeframeChange={setActiveTimeframe} />
@@ -962,6 +966,11 @@ function getNotificationStatus() {
   }
 
   return "Click Request permission to enable browser notifications.";
+}
+
+function isTradingViewCryptoSymbol(symbol: string) {
+  const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return normalized === "BTCUSD" || normalized === "BTCUSDT" || normalized === "ETHUSD" || normalized === "ETHUSDT";
 }
 
 function formatAlertTime(value: number) {

@@ -101,7 +101,14 @@ export function buildLiveTimeframeAnalyses({
     const candles = candleMap[timeframe];
 
     if (candles.length < MIN_ANALYSIS_CANDLES) {
-      return emptyTimeframeAnalysis({ mode, newsNearby: redNewsNearby, scalpingSensitivity, timeframe, waitReason: "WAIT: not enough live candles" });
+      return emptyTimeframeAnalysis({
+        missingCondition: getInsufficientDataCondition(symbolProfile),
+        mode,
+        newsNearby: redNewsNearby,
+        scalpingSensitivity,
+        timeframe,
+        waitReason: getInsufficientDataWaitReason(symbolProfile),
+      });
     }
 
     const baseAnalysis = analyzeCandles(candles);
@@ -193,21 +200,33 @@ export function buildLiveTradePlan({
   const price = getLatestPrice(candleMap);
 
   if (!price || candles.length < MIN_ANALYSIS_CANDLES) {
+    const cryptoVisualOnly = isTradingViewCryptoVisualProfile(symbolProfile);
+    const waitReason = getInsufficientDataWaitReason(symbolProfile);
+    const missingCondition = getInsufficientDataCondition(symbolProfile);
+
     return {
       direction: "Neutral",
       decision: "WAIT",
       signalMode: mode,
       scalpingSensitivity,
-      waitReason: "WAIT: not enough live candles",
-      missingConditions: ["Live MT5 candles"],
+      waitReason,
+      missingConditions: [missingCondition],
       score: 0,
-      summary: `Flux live ${symbolProfile.symbol} requis pour calculer un plan fiable. Aucun signal n'est genere depuis des donnees fictives.`,
+      summary: cryptoVisualOnly
+        ? `Mode Crypto actif via TradingView fallback pour ${symbolProfile.symbol}. Le graphique reste disponible; l'analyse avancee automatique passe en visual-only tant qu'aucun flux OHLC crypto interne n'est disponible.`
+        : `Flux live ${symbolProfile.symbol} requis pour calculer un plan fiable. Aucun signal n'est genere depuis des donnees fictives.`,
       entry: price,
       stopLoss: 0,
       takeProfits: [0, 0, 0],
       riskReward: 0,
       lotSize: 0,
-      alerts: ["Aucune donnee mock n'est utilisee pour le graphique.", `Connecte un flux ${symbolProfile.symbol} temps reel pour activer le plan.`],
+      alerts: cryptoVisualOnly
+        ? [
+            "TradingView Crypto est actif pour le graphique.",
+            "Source analyse: TradingView visual mode, sans OHLC interne pour calculer un BUY/SELL automatique.",
+            "Le moteur Crypto produira BUY / SELL / WAIT des qu'un flux OHLC crypto exploitable sera disponible.",
+          ]
+        : ["Aucune donnee mock n'est utilisee pour le graphique.", `Connecte un flux ${symbolProfile.symbol} temps reel pour activer le plan.`],
       scoring: { technical: 0, orderFlow: 0, fundamental: 0, risk: 0, total: 0 },
       orderBlock: null,
       liquidity: null,
@@ -1047,12 +1066,14 @@ function summarizeDecision(decision: Signal, direction: Direction, mode: SignalM
 }
 
 function emptyTimeframeAnalysis({
+  missingCondition = "Live candles",
   mode,
   newsNearby,
   scalpingSensitivity,
   timeframe,
   waitReason,
 }: {
+  missingCondition?: string;
   mode: SignalMode;
   newsNearby: boolean;
   scalpingSensitivity: ScalpingSensitivity;
@@ -1065,7 +1086,7 @@ function emptyTimeframeAnalysis({
     signalMode: mode,
     scalpingSensitivity,
     waitReason,
-    missingConditions: ["Live candles"],
+    missingConditions: [missingCondition],
     score: 0,
     trend: "range",
     rsi: 50,
@@ -1085,6 +1106,23 @@ function emptyTimeframeAnalysis({
     riskReward: 0,
     summary: waitReason,
   };
+}
+
+function getInsufficientDataWaitReason(symbolProfile: SymbolProfile) {
+  if (isTradingViewCryptoVisualProfile(symbolProfile)) {
+    return "TradingView visual mode: crypto chart active, OHLC crypto feed required for automated BUY/SELL analysis";
+  }
+
+  return "WAIT: not enough live candles";
+}
+
+function getInsufficientDataCondition(symbolProfile: SymbolProfile) {
+  return isTradingViewCryptoVisualProfile(symbolProfile) ? "OHLC crypto feed" : "Live candles";
+}
+
+function isTradingViewCryptoVisualProfile(symbolProfile: SymbolProfile) {
+  const symbol = symbolProfile.symbol.toUpperCase();
+  return symbolProfile.category === "Crypto" && (symbol === "BTCUSD" || symbol === "BTCUSDT" || symbol === "ETHUSD" || symbol === "ETHUSDT");
 }
 
 function clamp(value: number, max: number) {

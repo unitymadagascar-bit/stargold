@@ -46,6 +46,7 @@ const DEFAULT_VISIBLE_BARS = 95;
 export function GoldChart({
   candleMap,
   connectionMessage,
+  connectionSource,
   connectionStatus,
   lastTick,
   orderBlock,
@@ -58,6 +59,7 @@ export function GoldChart({
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   connectionMessage: string;
+  connectionSource: string | null;
   connectionStatus: LiveConnectionStatus;
   lastTick: MarketTick | null;
   orderBlock?: OrderBlockZone | null;
@@ -74,6 +76,7 @@ export function GoldChart({
   const [fvgOverlay, setFvgOverlay] = useState<OrderBlockOverlay | null>(null);
   const [riskRewardOverlay, setRiskRewardOverlay] = useState<RiskRewardOverlay | null>(null);
   const [riskRewardNotice, setRiskRewardNotice] = useState<string | null>(null);
+  const [fallbackDelayElapsed, setFallbackDelayElapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
@@ -117,6 +120,28 @@ export function GoldChart({
       })),
     [candles],
   );
+  const tradingViewSymbol = getTradingViewFallbackSymbol(symbolProfile.symbol);
+  const showTradingViewFallback = Boolean(displaySettings.showEmptyHelper && !candles.length && fallbackDelayElapsed && tradingViewSymbol);
+  const marketClosed = Boolean(displaySettings.showEmptyHelper && !candles.length && !showTradingViewFallback && isLikelyWeekendClosed(symbolProfile.category));
+  const chartSourceLabel = showTradingViewFallback ? "TradingView fallback" : "MT5 Bridge";
+  const fallbackHint =
+    showTradingViewFallback && connectionSource
+      ? `MT5 indisponible pour ${symbolProfile.symbol}. Derniere source app: ${connectionSource}.`
+      : `Aucun tick MT5 exploitable pour ${symbolProfile.symbol} apres quelques secondes.`;
+
+  useEffect(() => {
+    setFallbackDelayElapsed(false);
+
+    if (candles.length || symbolProfile.category !== "Crypto") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setFallbackDelayElapsed(true);
+    }, 4500);
+
+    return () => window.clearTimeout(timer);
+  }, [candles.length, symbolProfile.category, symbolProfile.symbol, timeframe]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -600,9 +625,14 @@ export function GoldChart({
       ) : null}
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${autoFollow ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-100"}`}>
-          {autoFollow ? "Live follow ON" : "Viewing history"}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${autoFollow ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-200" : "border-amber-300/25 bg-amber-300/10 text-amber-100"}`}>
+            {autoFollow ? "Live follow ON" : "Viewing history"}
+          </span>
+          <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${showTradingViewFallback ? "border-sky-300/25 bg-sky-300/10 text-sky-100" : "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"}`}>
+            Source graphique : {chartSourceLabel}
+          </span>
+        </div>
         <button
           className="inline-flex h-8 items-center gap-2 rounded border border-white/10 bg-white/[0.04] px-3 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.08]"
           type="button"
@@ -615,6 +645,7 @@ export function GoldChart({
 
       <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
         <div ref={containerRef} className="h-full w-full" />
+        {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart fallbackHint={fallbackHint} symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
         {orderBlockOverlay ? (
           <div
             className="pointer-events-none absolute inset-x-0 z-10 border-y"
@@ -651,9 +682,9 @@ export function GoldChart({
             </span>
           </div>
         ) : null}
-        {riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
-        {!riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
-        {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
+        {!showTradingViewFallback && riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
+        {!showTradingViewFallback && !riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
+        {!candles.length && displaySettings.showEmptyHelper && !showTradingViewFallback ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} marketClosed={marketClosed} plan={plan} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
       </div>
 
       {displaySettings.showRsi ? <RsiPanel rsi={currentRsi} values={rsiSeries} /> : null}
@@ -739,17 +770,28 @@ function DisplayToggle({ checked, label, onChange }: { checked: boolean; label: 
 function ChartEmptyState({
   connectionMessage,
   connectionStatus,
+  marketClosed,
   plan,
   symbolProfile,
   timeframe,
 }: {
   connectionMessage: string;
   connectionStatus: LiveConnectionStatus;
+  marketClosed: boolean;
   plan: TradePlan;
   symbolProfile: SymbolProfile;
   timeframe: Timeframe;
 }) {
   const live = connectionStatus === "live";
+  const title = marketClosed ? `Marche ferme pour ${symbolProfile.symbol}` : `Graphique ${symbolProfile.symbol} ${timeframe} en attente de bougies live`;
+  const description = marketClosed
+    ? `${symbolProfile.category} est probablement ferme le week-end. Le graphique reprendra automatiquement quand le marche ou MT5 fournira des bougies.`
+    : connectionMessage;
+  const notice = marketClosed
+    ? "Le chart n'affiche pas de zone vide: le marche semble ferme pour cet actif. Les signaux restent en attente jusqu'a la reprise du flux."
+    : symbolProfile.category === "Crypto"
+      ? "Recherche du flux MT5 en cours. Si aucun tick crypto n'arrive, le graphique bascule automatiquement vers TradingView fallback."
+      : "Le chart n'affiche pas de zone vide: il attend un flux MT5 exploitable avant de dessiner les bougies, les Order Blocks et la liquidite.";
 
   return (
     <div className="absolute inset-0 z-20 bg-[#06080c] p-3">
@@ -761,15 +803,15 @@ function ChartEmptyState({
                 {live ? <Wifi size={18} /> : <WifiOff size={18} />}
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">Graphique {symbolProfile.symbol} {timeframe} en attente de bougies live</p>
-                <p className="mt-1 text-xs leading-5 text-slate-400">{connectionMessage}</p>
+                <p className="text-sm font-semibold text-white">{title}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{description}</p>
               </div>
             </div>
 
             <div className="mt-4 grid gap-2 md:grid-cols-2">
               <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value={`Lance Star Gold Bridge sur ${symbolProfile.symbol}`} />
               <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value={`Choisis une timeframe adaptee a ${symbolProfile.category}`} />
-              <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value="Attends les premieres bougies broker" />
+              <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value={marketClosed ? "Marche ferme: aucune bougie live attendue maintenant" : "Attends les premieres bougies broker"} />
               <EmptyStep icon={<ShieldAlert size={16} />} label="4. Risque" value="Aucun signal sans confirmation live" />
             </div>
           </div>
@@ -778,7 +820,7 @@ function ChartEmptyState({
             <div className="flex gap-3">
               <AlertTriangle className="mt-0.5 shrink-0 text-amber-200" size={18} />
               <p className="text-sm leading-6 text-amber-100">
-                Le chart n'affiche pas de zone vide: il attend un flux MT5 exploitable avant de dessiner les bougies, les Order Blocks et la liquidite.
+                {notice}
               </p>
             </div>
           </div>
@@ -821,6 +863,38 @@ function ScalpStatus({ active, label, value }: { active: boolean; label: string;
     <div className="flex items-center justify-between gap-2 rounded-md bg-black/30 px-3 py-2">
       <span className="text-slate-500">{label}</span>
       <span className={`truncate text-right font-mono font-semibold ${active ? "text-emerald-300" : "text-slate-300"}`}>{value}</span>
+    </div>
+  );
+}
+
+function TradingViewFallbackChart({
+  fallbackHint,
+  symbol,
+  symbolProfile,
+  timeframe,
+}: {
+  fallbackHint: string;
+  symbol: string;
+  symbolProfile: SymbolProfile;
+  timeframe: Timeframe;
+}) {
+  const interval = getTradingViewInterval(timeframe);
+  const src = `https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(symbol)}&interval=${interval}&hidesidetoolbar=1&hideideas=1&symboledit=0&saveimage=0&toolbarbg=0f172a&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1`;
+
+  return (
+    <div className="absolute inset-0 z-20 bg-[#06080c]">
+      <iframe
+        className="h-full w-full border-0"
+        src={src}
+        title={`TradingView fallback ${symbolProfile.symbol}`}
+      />
+      <div className="pointer-events-none absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-sky-300/25 bg-[#07111f]/90 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView fallback</p>
+        <p className="mt-1 text-xs leading-5 text-slate-200">
+          {symbol} live pour {symbolProfile.symbol}. Les signaux scalping avances restent WAIT tant que les bougies MT5 ne confirment pas.
+        </p>
+        <p className="mt-1 text-[11px] leading-4 text-slate-400">{fallbackHint}</p>
+      </div>
     </div>
   );
 }
@@ -1098,6 +1172,43 @@ function Legend({ color, label }: { color: string; label: string }) {
 
 function formatPrice(value?: number) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "--";
+}
+
+function getTradingViewFallbackSymbol(symbol: string) {
+  const normalized = symbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  if (normalized === "BTCUSD" || normalized === "BTCUSDT") {
+    return "BINANCE:BTCUSDT";
+  }
+
+  if (normalized === "ETHUSD" || normalized === "ETHUSDT") {
+    return "BINANCE:ETHUSDT";
+  }
+
+  return null;
+}
+
+function getTradingViewInterval(timeframe: Timeframe) {
+  const intervals: Record<Timeframe, string> = {
+    M1: "1",
+    M5: "5",
+    M15: "15",
+    M30: "30",
+    H1: "60",
+    H4: "240",
+    D1: "D",
+  };
+
+  return intervals[timeframe];
+}
+
+function isLikelyWeekendClosed(category: SymbolProfile["category"]) {
+  if (category === "Crypto") {
+    return false;
+  }
+
+  const day = new Date().getDay();
+  return day === 0 || day === 6;
 }
 
 function calculateRsiSeries(values: number[], period = 14) {

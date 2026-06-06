@@ -47,7 +47,7 @@ export function MainDashboard() {
   const [movingAveragePeriod, setMovingAveragePeriod] = useState(50);
   const [alertSettings, setAlertSettings] = useState<AlertSettings>(() => loadAlertSettings());
   const [alertHistory, setAlertHistory] = useState<AlertHistoryItem[]>(() => loadAlertHistory());
-  const [notificationStatus, setNotificationStatus] = useState(() => getNotificationStatus());
+  const [notificationStatus, setNotificationStatus] = useState("Checking browser notification support...");
   const lastAlertRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const timeframeAnalyses = useMemo(
@@ -71,6 +71,10 @@ export function MainDashboard() {
       setActiveTimeframe("M5");
     }
   };
+
+  useEffect(() => {
+    setNotificationStatus(getNotificationStatus());
+  }, []);
 
   useEffect(() => {
     window.localStorage.setItem("tradetsr-alert-settings", JSON.stringify(alertSettings));
@@ -170,6 +174,7 @@ export function MainDashboard() {
           <GoldChart
             candleMap={live.candleMap}
             connectionMessage={live.message}
+            connectionSource={live.source}
             connectionStatus={live.status}
             lastTick={live.lastTick}
             orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock}

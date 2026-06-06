@@ -15,7 +15,7 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketTick, OrbAnalysis, OrderBlockZone, Timeframe, TradePlan } from "@/types";
+import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketTick, OrbAnalysis, OrderBlockZone, SymbolProfile, Timeframe, TradePlan } from "@/types";
 import { calculateRSI } from "@/lib/indicators";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -53,6 +53,7 @@ export function GoldChart({
   orb,
   onTimeframeChange,
   plan,
+  symbolProfile,
   timeframe,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
@@ -64,6 +65,7 @@ export function GoldChart({
   orb?: OrbAnalysis | null;
   onTimeframeChange: (timeframe: Timeframe) => void;
   plan: TradePlan;
+  symbolProfile: SymbolProfile;
   timeframe: Timeframe;
 }) {
   const candles = candleMap[timeframe];
@@ -539,7 +541,7 @@ export function GoldChart({
               {connectionStatus === "live" ? <Wifi size={18} /> : <WifiOff size={18} />}
             </div>
             <div>
-              <h2 className="text-base font-semibold text-white">XAUUSD live chart</h2>
+              <h2 className="text-base font-semibold text-white">{symbolProfile.symbol} live chart</h2>
               <p className="text-xs text-slate-400">{connectionMessage}</p>
             </div>
           </div>
@@ -651,7 +653,7 @@ export function GoldChart({
         ) : null}
         {riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
         {!riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
-        {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} timeframe={timeframe} /> : null}
+        {!candles.length && displaySettings.showEmptyHelper ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} plan={plan} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
       </div>
 
       {displaySettings.showRsi ? <RsiPanel rsi={currentRsi} values={rsiSeries} /> : null}
@@ -738,11 +740,13 @@ function ChartEmptyState({
   connectionMessage,
   connectionStatus,
   plan,
+  symbolProfile,
   timeframe,
 }: {
   connectionMessage: string;
   connectionStatus: LiveConnectionStatus;
   plan: TradePlan;
+  symbolProfile: SymbolProfile;
   timeframe: Timeframe;
 }) {
   const live = connectionStatus === "live";
@@ -757,14 +761,14 @@ function ChartEmptyState({
                 {live ? <Wifi size={18} /> : <WifiOff size={18} />}
               </div>
               <div>
-                <p className="text-sm font-semibold text-white">Graphique {timeframe} en attente de bougies live</p>
+                <p className="text-sm font-semibold text-white">Graphique {symbolProfile.symbol} {timeframe} en attente de bougies live</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{connectionMessage}</p>
               </div>
             </div>
 
             <div className="mt-4 grid gap-2 md:grid-cols-2">
-              <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value="Lance Star Gold Bridge sur XAUUSD" />
-              <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value="Choisis M1, M5 ou M15 pour scalp" />
+              <EmptyStep icon={<Wifi size={16} />} label="1. Bridge MT5" value={`Lance Star Gold Bridge sur ${symbolProfile.symbol}`} />
+              <EmptyStep icon={<Target size={16} />} label="2. Timeframe" value={`Choisis une timeframe adaptee a ${symbolProfile.category}`} />
               <EmptyStep icon={<Gauge size={16} />} label="3. Donnees" value="Attends les premieres bougies broker" />
               <EmptyStep icon={<ShieldAlert size={16} />} label="4. Risque" value="Aucun signal sans confirmation live" />
             </div>

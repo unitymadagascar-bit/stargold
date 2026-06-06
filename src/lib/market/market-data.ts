@@ -2,6 +2,7 @@ import type { Candle, MarketTick, Timeframe } from "@/types";
 import { fetchEodhdHistory, fetchEodhdTick, getEodhdRestSymbol, getEodhdSourceLabel } from "@/lib/market/eodhd-market";
 import { getMt5History, getMt5Tick } from "@/lib/market/mt5-store";
 import { fetchYahooGoldHistory, fetchYahooGoldTick, getYahooGoldSymbol, getYahooSourceLabel } from "@/lib/market/yahoo-market";
+import { normalizeSymbol } from "@/lib/symbols/profiles";
 
 export interface MarketDataResult<T> {
   data: T;
@@ -10,8 +11,9 @@ export interface MarketDataResult<T> {
   warning: string | null;
 }
 
-export async function fetchMarketHistory(timeframe: Timeframe, limit: number): Promise<MarketDataResult<Candle[]>> {
-  const mt5 = await getMt5History(timeframe, limit);
+export async function fetchMarketHistory(timeframe: Timeframe, limit: number, symbol = "XAUUSD"): Promise<MarketDataResult<Candle[]>> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const mt5 = await getMt5History(timeframe, limit, normalizedSymbol);
 
   if (mt5) {
     return {
@@ -23,7 +25,11 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
   }
 
   if (!isExternalFallbackEnabled()) {
-    throw new Error("MT5 non connecte. Lance le bridge Star Gold By TSR dans MT5 pour synchroniser les bougies avec ton broker.");
+    throw new Error(`MT5 non connecte pour ${normalizedSymbol}. Attache le bridge Star Gold By TSR sur un graphique ${normalizedSymbol} dans MT5.`);
+  }
+
+  if (normalizedSymbol !== "XAUUSD") {
+    throw new Error(`Aucun flux ${normalizedSymbol}. Le fallback externe est reserve a XAUUSD; ouvre ${normalizedSymbol} dans MT5 avec le bridge.`);
   }
 
   try {
@@ -51,8 +57,9 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number): P
   }
 }
 
-export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
-  const mt5 = await getMt5Tick();
+export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResult<MarketTick>> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const mt5 = await getMt5Tick(normalizedSymbol);
 
   if (mt5) {
     return {
@@ -64,7 +71,11 @@ export async function fetchMarketTick(): Promise<MarketDataResult<MarketTick>> {
   }
 
   if (!isExternalFallbackEnabled()) {
-    throw new Error("MT5 non connecte. Lance le bridge Star Gold By TSR dans MT5 pour synchroniser le prix avec ton broker.");
+    throw new Error(`MT5 non connecte pour ${normalizedSymbol}. Attache le bridge Star Gold By TSR sur un graphique ${normalizedSymbol} dans MT5.`);
+  }
+
+  if (normalizedSymbol !== "XAUUSD") {
+    throw new Error(`Aucun tick ${normalizedSymbol}. Le fallback externe est reserve a XAUUSD; ouvre ${normalizedSymbol} dans MT5 avec le bridge.`);
   }
 
   try {

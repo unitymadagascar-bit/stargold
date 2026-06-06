@@ -122,7 +122,7 @@ export function normalizeProviderTick(payload: unknown): MarketTick | null {
   }
 
   return {
-    symbol: "XAUUSD",
+    symbol: String(source.symbol ?? source.Symbol ?? source.brokerSymbol ?? source.instrument ?? "XAUUSD").toUpperCase(),
     time,
     bid,
     ask,

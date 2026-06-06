@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Candle, LiveMarketState, MarketTick, Timeframe } from "@/types";
+import type { Candle, LiveMarketState, MarketTick, SymbolCode, Timeframe } from "@/types";
 import { applyTickToCandles, normalizeHistoryCandles, normalizeProviderTick } from "@/lib/market/candle-engine";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -21,10 +21,11 @@ const tickPollUrl = process.env.NEXT_PUBLIC_XAUUSD_TICK_POLL_URL || "/api/market
 const localBridgeOrigin = process.env.NEXT_PUBLIC_MT5_LOCAL_BRIDGE_ORIGIN || "http://127.0.0.1:3000";
 const serverOffsetMinutes = Number(process.env.NEXT_PUBLIC_MARKET_SERVER_UTC_OFFSET_MINUTES ?? 0);
 
-export function useLiveXauusd(): LiveMarketState {
+export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
+  const normalizedSymbol = symbol.toUpperCase();
   const [state, setState] = useState<LiveMarketState>({
     status: "connecting",
-    message: "Connexion au flux XAUUSD live.",
+    message: `Connexion au flux ${normalizedSymbol} live.`,
     source: null,
     lastTick: null,
     serverOffsetMinutes: Number.isFinite(serverOffsetMinutes) ? serverOffsetMinutes : 0,
@@ -41,7 +42,11 @@ export function useLiveXauusd(): LiveMarketState {
     [],
   );
 
-  function processTick(tick: MarketTick, message = "Flux XAUUSD live connecte.", source: string | null = null) {
+  function processTick(tick: MarketTick, message = `Flux ${normalizedSymbol} live connecte.`, source: string | null = null) {
+    if (tick.symbol && tick.symbol.toUpperCase() !== normalizedSymbol) {
+      return;
+    }
+
     const latencyMs = Math.max(0, Date.now() - tick.time * 1000);
 
     setState((current) => {
@@ -90,12 +95,22 @@ export function useLiveXauusd(): LiveMarketState {
   useEffect(() => {
     let disposed = false;
 
+    setState({
+      status: "connecting",
+      message: `Connexion au flux ${normalizedSymbol} live.`,
+      source: null,
+      lastTick: null,
+      serverOffsetMinutes: Number.isFinite(serverOffsetMinutes) ? serverOffsetMinutes : 0,
+      latencyMs: null,
+      candleMap: createEmptyCandleMap(),
+    });
+
     async function loadHistory() {
       const results: Array<readonly [Timeframe, Candle[]]> = [];
 
       for (const timeframe of timeframes) {
         try {
-          const payload = await fetchFirstHistoryJson(endpoints.history, timeframe);
+          const payload = await fetchFirstHistoryJson(endpoints.history, timeframe, normalizedSymbol);
           results.push([timeframe, normalizeHistoryCandles(payload)] as const);
           await wait(120);
         } catch {
@@ -118,7 +133,7 @@ export function useLiveXauusd(): LiveMarketState {
         return {
           ...current,
           candleMap,
-          message: loadedCount ? "Historique XAUUSD charge, connexion au live en cours." : current.message,
+          message: loadedCount ? `Historique ${normalizedSymbol} charge, connexion au live en cours.` : current.message,
         };
       });
     }
@@ -136,7 +151,7 @@ export function useLiveXauusd(): LiveMarketState {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [normalizedSymbol]);
 
   useEffect(() => {
     let disposed = false;
@@ -162,7 +177,7 @@ export function useLiveXauusd(): LiveMarketState {
 
     async function pollTick() {
       try {
-        const payload = await fetchFirstJson(endpoints.tick);
+        const payload = await fetchFirstJson(addSymbolToUrls(endpoints.tick, normalizedSymbol));
 
         processMessage(payload);
       } catch (error) {
@@ -170,7 +185,7 @@ export function useLiveXauusd(): LiveMarketState {
           setState((current) => ({
             ...current,
             status: current.lastTick ? "reconnecting" : "error",
-            message: error instanceof Error ? error.message : "Tick XAUUSD indisponible.",
+            message: error instanceof Error ? error.message : `Tick ${normalizedSymbol} indisponible.`,
           }));
         }
       }
@@ -185,7 +200,7 @@ export function useLiveXauusd(): LiveMarketState {
       setState((current) => ({
         ...current,
         status: current.lastTick ? "reconnecting" : "connecting",
-        message: "Bascule sur polling HTTP XAUUSD.",
+        message: `Bascule sur polling HTTP ${normalizedSymbol}.`,
       }));
       pollTick();
       pollTimer = setInterval(pollTick, 2500);
@@ -196,9 +211,9 @@ export function useLiveXauusd(): LiveMarketState {
         return;
       }
 
-      setState((current) => ({ ...current, status: retryRef.current ? "reconnecting" : "connecting", message: "Connexion au flux XAUUSD." }));
+      setState((current) => ({ ...current, status: retryRef.current ? "reconnecting" : "connecting", message: `Connexion au flux ${normalizedSymbol}.` }));
 
-      const selectedStreamUrl = endpoints.stream[0];
+      const selectedStreamUrl = addSymbolToUrls(endpoints.stream, normalizedSymbol)[0];
 
       if (selectedStreamUrl.startsWith("ws")) {
         const socket = new WebSocket(selectedStreamUrl);
@@ -206,7 +221,7 @@ export function useLiveXauusd(): LiveMarketState {
 
         socket.addEventListener("open", () => {
           retryRef.current = 0;
-          setState((current) => ({ ...current, status: "live", message: "Flux XAUUSD live connecte." }));
+          setState((current) => ({ ...current, status: "live", message: `Flux ${normalizedSymbol} live connecte.` }));
         });
         socket.addEventListener("message", (event) => {
           try {
@@ -217,7 +232,7 @@ export function useLiveXauusd(): LiveMarketState {
         });
         socket.addEventListener("close", scheduleReconnect);
         socket.addEventListener("error", () => {
-          setState((current) => ({ ...current, status: "error", message: "Erreur sur le flux WebSocket XAUUSD." }));
+          setState((current) => ({ ...current, status: "error", message: `Erreur sur le flux WebSocket ${normalizedSymbol}.` }));
         });
         return;
       }
@@ -227,7 +242,7 @@ export function useLiveXauusd(): LiveMarketState {
 
       eventSource.addEventListener("open", () => {
         retryRef.current = 0;
-        setState((current) => ({ ...current, status: "live", message: "Flux XAUUSD live connecte." }));
+        setState((current) => ({ ...current, status: "live", message: `Flux ${normalizedSymbol} live connecte.` }));
       });
       const handleEventSourceMessage = (event: Event) => {
         const messageEvent = event as MessageEvent;
@@ -277,7 +292,7 @@ export function useLiveXauusd(): LiveMarketState {
       }
       close?.();
     };
-  }, []);
+  }, [normalizedSymbol]);
 
   return useMemo(() => state, [state]);
 }
@@ -303,10 +318,18 @@ async function fetchFirstJson(urls: string[]) {
   throw new Error(errors.at(-1) ?? "Bridge MT5 inaccessible.");
 }
 
-async function fetchFirstHistoryJson(urls: string[], timeframe: Timeframe) {
+function addSymbolToUrls(urls: string[], symbol: string) {
+  return urls.map((candidate) => {
+    const url = new URL(candidate, window.location.origin);
+    url.searchParams.set("symbol", symbol);
+    return url.toString();
+  });
+}
+
+async function fetchFirstHistoryJson(urls: string[], timeframe: Timeframe, symbol: string) {
   const candidates = urls.map((candidate) => {
     const url = new URL(candidate, window.location.origin);
-    url.searchParams.set("symbol", "XAUUSD");
+    url.searchParams.set("symbol", symbol);
     url.searchParams.set("timeframe", timeframe);
     url.searchParams.set("limit", "600");
     return url.toString();
@@ -337,7 +360,7 @@ function wait(ms: number) {
 
 function getMarketMessage(data: unknown) {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
-    return "Flux XAUUSD live connecte.";
+    return "Flux live connecte.";
   }
 
   const source = "source" in data ? String(data.source) : "marche";

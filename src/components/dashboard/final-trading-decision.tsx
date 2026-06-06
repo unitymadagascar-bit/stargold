@@ -106,8 +106,8 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "STRONG SELL" || (signal !== "WAIT" && plan.direction === "Bearish");
-  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "STRONG BUY" || (signal !== "WAIT" && plan.direction === "Bullish");
+  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || (signal !== "WAIT" && plan.direction === "Bearish");
+  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || (signal !== "WAIT" && plan.direction === "Bullish");
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
   const orb = plan.orb ?? activeAnalysis?.orb;
@@ -193,11 +193,11 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
     return "WATCH SELL";
   }
 
-  if (signal !== "WAIT" && bullish) {
+  if (signal === "BUY" || (signal !== "WAIT" && bullish)) {
     return "BUY";
   }
 
-  if (signal !== "WAIT" && bearish) {
+  if (signal === "SELL" || (signal !== "WAIT" && bearish)) {
     return "SELL";
   }
 
@@ -215,6 +215,10 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
 
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Setup en formation. Ne pas entrer encore: attendre la confirmation indiquee.";
+  }
+
+  if (signal === "BUY" || signal === "SELL") {
+    return "Setup educatif confirme par le moteur de categorie. Verifie risque, news et spread avant toute decision.";
   }
 
   if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
@@ -247,6 +251,10 @@ function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bull
 
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Setup a surveiller";
+  }
+
+  if (signal === "BUY" || signal === "SELL") {
+    return "Decision educative";
   }
 
   if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
@@ -293,6 +301,10 @@ function getNextConfirmation({ missingCondition, signal }: { missingCondition: s
     return missingCondition;
   }
 
+  if (signal === "BUY" || signal === "SELL") {
+    return "Verifier news, spread, SL, TP et taille de lot avant toute execution manuelle.";
+  }
+
   if (signal === "BUY SCALP READY" || signal === "SELL SCALP READY") {
     return "Entry trigger: cassure/rejet sur la prochaine bougie M1/M5 dans le sens du signal.";
   }
@@ -315,6 +327,14 @@ function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; b
 
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {
     return "Watch only. No entry until the missing confirmation appears.";
+  }
+
+  if (signal === "BUY") {
+    return "Buy only if execution, risk and spread remain acceptable.";
+  }
+
+  if (signal === "SELL") {
+    return "Sell only if execution, risk and spread remain acceptable.";
   }
 
   if (bullish) {
@@ -525,7 +545,7 @@ function ChecklistItem({ label, status }: { label: string; status: CheckStatus }
 }
 
 function getSignalTone(signal: Signal) {
-  if (signal === "STRONG BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
+  if (signal === "STRONG BUY" || signal === "BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
     return {
       badge: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
       border: "border-emerald-300/20",
@@ -541,7 +561,7 @@ function getSignalTone(signal: Signal) {
     };
   }
 
-  if (signal === "STRONG SELL" || signal === "SELL SCALP READY" || signal === "WATCH SELL") {
+  if (signal === "STRONG SELL" || signal === "SELL" || signal === "SELL SCALP READY" || signal === "WATCH SELL") {
     return {
       badge: "border-rose-300/25 bg-rose-300/10 text-rose-100",
       border: "border-rose-300/20",

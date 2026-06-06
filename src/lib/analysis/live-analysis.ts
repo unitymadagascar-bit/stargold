@@ -9,6 +9,7 @@ import type {
   ScalpingSensitivity,
   Signal,
   SignalMode,
+  SymbolProfile,
   TechnicalAnalysis,
   Timeframe,
   TimeframeAnalysis,
@@ -21,7 +22,9 @@ import { detectLiquidityAnalysis } from "@/lib/analysis/liquidity";
 import { detectFvgAnalysis, fvgDirectionMatches } from "@/lib/analysis/fvg";
 import { detectOrderBlock } from "@/lib/analysis/order-blocks";
 import { detectOrbAnalysis } from "@/lib/analysis/orb";
+import { getAnalysisEngine, type SymbolAnalysisEngine } from "@/lib/analysis/symbol-engines";
 import { timeframes } from "@/lib/market/timeframes";
+import { getSymbolProfile } from "@/lib/symbols/profiles";
 import { calculateRiskReward, calculateLotSize } from "@/lib/risk/risk";
 import { generateFinalDecision, inferDirection } from "@/lib/scoring/confluence";
 import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDecisionStrength, hasRequiredTechnicalConfirmation } from "@/lib/fundamentals/decision-score";
@@ -74,6 +77,7 @@ export function buildLiveTimeframeAnalyses({
   orbRequireRetest = false,
   scalpingSensitivity = "balanced",
   spread = null,
+  symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
@@ -86,10 +90,12 @@ export function buildLiveTimeframeAnalyses({
   orbRequireRetest?: boolean;
   scalpingSensitivity?: ScalpingSensitivity;
   spread?: number | null;
+  symbolProfile?: SymbolProfile;
 }): TimeframeAnalysis[] {
   void macro;
   const higherTimeframe = getHigherTimeframeContext(candleMap);
   const redNewsNearby = hasRedNewsRisk({ fundamental, news });
+  const engine = getAnalysisEngine(symbolProfile);
 
   return timeframes.map((timeframe) => {
     const candles = candleMap[timeframe];
@@ -104,7 +110,7 @@ export function buildLiveTimeframeAnalyses({
     const stopLoss = getStopLoss(direction, price, baseAnalysis.support, baseAnalysis.resistance, baseAnalysis.atr);
     const target = direction === "Bearish" ? price - Math.abs(price - stopLoss) * 2 : price + Math.abs(price - stopLoss) * 2;
     const riskReward = calculateRiskReward(price, stopLoss, target);
-    const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe });
+    const analysis = withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe });
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
     const decision = evaluateSignal({
       analysis,
@@ -118,6 +124,8 @@ export function buildLiveTimeframeAnalyses({
       redNewsNearby,
       riskReward,
       scalpingSensitivity,
+      spread,
+      symbolProfile,
       timeframe,
     });
 
@@ -163,6 +171,7 @@ export function buildLiveTradePlan({
   preferredTimeframe,
   scalpingSensitivity = "balanced",
   spread = null,
+  symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
   candleMap: Record<Timeframe, Candle[]>;
   fundamental: FundamentalContext;
@@ -176,6 +185,7 @@ export function buildLiveTradePlan({
   preferredTimeframe?: Timeframe;
   scalpingSensitivity?: ScalpingSensitivity;
   spread?: number | null;
+  symbolProfile?: SymbolProfile;
 }): TradePlan {
   void macro;
   const analysisTimeframe = getPlanTimeframe(candleMap, mode, preferredTimeframe);
@@ -191,13 +201,13 @@ export function buildLiveTradePlan({
       waitReason: "WAIT: not enough live candles",
       missingConditions: ["Live MT5 candles"],
       score: 0,
-      summary: "Flux live connecte requis pour calculer un plan fiable. Aucun signal n'est genere depuis des donnees fictives.",
+      summary: `Flux live ${symbolProfile.symbol} requis pour calculer un plan fiable. Aucun signal n'est genere depuis des donnees fictives.`,
       entry: price,
       stopLoss: 0,
       takeProfits: [0, 0, 0],
       riskReward: 0,
       lotSize: 0,
-      alerts: ["Aucune donnee mock n'est utilisee pour le graphique.", "Connecte un flux XAUUSD temps reel pour activer le plan."],
+      alerts: ["Aucune donnee mock n'est utilisee pour le graphique.", `Connecte un flux ${symbolProfile.symbol} temps reel pour activer le plan.`],
       scoring: { technical: 0, orderFlow: 0, fundamental: 0, risk: 0, total: 0 },
       orderBlock: null,
       liquidity: null,
@@ -208,6 +218,7 @@ export function buildLiveTradePlan({
   }
 
   const higherTimeframe = getHigherTimeframeContext(candleMap);
+  const engine = getAnalysisEngine(symbolProfile);
   const baseAnalysis = analyzeCandles(candles);
   const direction = inferDirection(baseAnalysis);
   const riskUnit = Math.max(baseAnalysis.atr * 1.25, price * 0.001);
@@ -215,7 +226,7 @@ export function buildLiveTradePlan({
   const takeProfits = getTakeProfits(direction, price, Math.abs(price - stopLoss));
   const riskReward = calculateRiskReward(price, stopLoss, takeProfits[0]);
   const redNewsNearby = hasRedNewsRisk({ fundamental, news });
-  const analysis = withOrderBlock({ analysis: baseAnalysis, candles, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe: analysisTimeframe });
+  const analysis = withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe: analysisTimeframe });
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
   const decision = evaluateSignal({
     analysis,
@@ -229,6 +240,8 @@ export function buildLiveTradePlan({
     redNewsNearby,
     riskReward,
     scalpingSensitivity,
+    spread,
+    symbolProfile,
     timeframe: analysisTimeframe,
   });
   const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
@@ -262,7 +275,7 @@ export function buildLiveTradePlan({
       mode === "scalping" ? "Scalping has higher risk and requires strict stop loss." : "Conservative mode requires stronger confirmation.",
       analysis.liquiditySweep ? "Liquidity sweep detecte sur les bougies live." : "Pas de sweep confirme pour l'instant.",
       describeOrderBlock(analysis),
-      analysis.orb ? `${analysis.orb.status}: ${analysis.orb.missingConfirmation}` : "ORB: waiting for London/New York opening range.",
+      analysis.orb ? `${analysis.orb.status}: ${analysis.orb.missingConfirmation}` : `${engine.settings.name}: ${symbolProfile.strategy}`,
       analysis.fvgAnalysis ? `FVG ${analysis.fvgAnalysis.direction} ${analysis.fvgAnalysis.score}/100, fill ${analysis.fvgAnalysis.fillPercent}%: ${analysis.fvgAnalysis.missingConfirmation}` : "No fresh M1/M5/M15 FVG confirmation.",
       "Order Block is an analysis zone, not a guaranteed entry.",
       fundamental.usdInterpretation,
@@ -288,6 +301,8 @@ function evaluateSignal({
   redNewsNearby,
   riskReward,
   scalpingSensitivity,
+  spread,
+  symbolProfile,
   timeframe,
 }: {
   analysis: TechnicalAnalysis;
@@ -301,8 +316,22 @@ function evaluateSignal({
   redNewsNearby: boolean;
   riskReward: number;
   scalpingSensitivity: ScalpingSensitivity;
+  spread: number | null;
+  symbolProfile: SymbolProfile;
   timeframe: Timeframe;
 }): DecisionResult {
+  const engine = getAnalysisEngine(symbolProfile);
+
+  if (symbolProfile.symbol !== "XAUUSD") {
+    const engineDecision = engine.evaluateEducationalDecision({ analysis, direction, redNewsNearby, riskReward, spread });
+    return {
+      confidence: engineDecision.confidence,
+      missingConditions: engineDecision.missingConditions,
+      signal: engineDecision.signal,
+      waitReason: engineDecision.waitReason,
+    };
+  }
+
   if (mode === "scalping") {
     return evaluateScalpingSignal({ analysis, candles, direction, higherTimeframe, redNewsNearby, riskReward, scalpingSensitivity, timeframe });
   }
@@ -630,6 +659,7 @@ function getPlannedTakeProfits({
 function withOrderBlock({
   analysis,
   candles,
+  engine,
   higherTimeframeTrend,
   movingAveragePeriod,
   movingAverageType,
@@ -642,6 +672,7 @@ function withOrderBlock({
 }: {
   analysis: TechnicalAnalysis;
   candles: Candle[];
+  engine: SymbolAnalysisEngine;
   higherTimeframeTrend: Trend;
   movingAveragePeriod: number;
   movingAverageType: MovingAverageType;
@@ -652,12 +683,12 @@ function withOrderBlock({
   spread: number | null;
   timeframe: Timeframe;
 }): TechnicalAnalysis {
-  const orb = ["M1", "M5", "M15"].includes(timeframe)
+  const orb = engine.settings.useGoldOrb && ["M1", "M5", "M15"].includes(timeframe)
     ? detectOrbAnalysis({ atr: analysis.atr, candles, duration: orbDuration, newsSafe: !newsRisk, requireRetest: orbRequireRetest, spread })
     : null;
   const orbDirection = orb?.direction && orb.direction !== "Neutral" ? orb.direction : inferDirection(analysis);
   const fvgDirection = orbDirection === "Bullish" ? "bullish" : orbDirection === "Bearish" ? "bearish" : null;
-  const fvgAnalysis = detectFvgAnalysis(candles, timeframe, { afterTime: orb?.breakoutTime, direction: fvgDirection });
+  const fvgAnalysis = detectFvgAnalysis(candles, timeframe, { afterTime: engine.settings.useGoldOrb ? orb?.breakoutTime : null, direction: fvgDirection });
   const trendFilter = detectTrendFilter({ candles, direction: orbDirection, movingAveragePeriod, movingAverageType });
 
   return {
@@ -1000,6 +1031,10 @@ function summarizeDecision(decision: Signal, direction: Direction, mode: SignalM
 
   if (decision === "BUY SCALP READY" || decision === "SELL SCALP READY") {
     return `Setup scalp ${direction.toLowerCase()} pret apres confirmation courte.`;
+  }
+
+  if (decision === "BUY" || decision === "SELL") {
+    return `Setup ${direction.toLowerCase()} confirme par le moteur de categorie.`;
   }
 
   if (decision === "WATCH BUY" || decision === "WATCH SELL") {

@@ -13,6 +13,7 @@ export function OPTIONS() {
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
+  const symbol = url.searchParams.get("symbol") ?? "XAUUSD";
   const timeframe = url.searchParams.get("timeframe") ?? "M5";
   const limit = clampLimit(Number(url.searchParams.get("limit") ?? 600));
 
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const result = await fetchMarketHistory(timeframe as Timeframe, limit);
+    const result = await fetchMarketHistory(timeframe as Timeframe, limit, symbol);
 
     return NextResponse.json(
       {
@@ -37,9 +38,9 @@ export async function GET(request: Request) {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Historique XAUUSD indisponible.",
+        error: error instanceof Error ? error.message : `Historique ${symbol} indisponible.`,
         source: "unavailable",
-        symbol: "XAUUSD",
+        symbol,
         timeframe,
         updatedAt: new Date().toISOString(),
         candles: [],

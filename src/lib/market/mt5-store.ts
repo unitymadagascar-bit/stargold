@@ -1,6 +1,7 @@
 import type { Candle, MarketTick, Timeframe } from "@/types";
 import { normalizeHistoryCandles, normalizeProviderTick } from "@/lib/market/candle-engine";
 import { timeframes } from "@/lib/market/timeframes";
+import { normalizeSymbol } from "@/lib/symbols/profiles";
 
 const MAX_CANDLES = 800;
 const STALE_TICK_MS = 10_000;
@@ -24,6 +25,7 @@ interface Mt5BridgeStore {
 
 interface Mt5BridgeGlobal {
   __tradetsrMt5Store?: Mt5BridgeStore;
+  __tradetsrMt5Stores?: Record<string, Mt5BridgeStore>;
 }
 
 export interface Mt5MarketResult<T> {
@@ -55,8 +57,9 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
   }
 
   const source = payload as Record<string, unknown>;
-  const store = getStore();
   const tick = normalizeProviderTick(source.tick ?? source);
+  const symbol = normalizeSymbol(String(source.symbol ?? source.brokerSymbol ?? tick?.symbol ?? "XAUUSD"));
+  const store = getStore(symbol);
   const candlesPayload = source.candles;
   const changedHistories: Timeframe[] = [];
 
@@ -76,7 +79,7 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
   }
 
   store.source = String(source.source ?? "MT5");
-  store.symbol = String(source.symbol ?? source.brokerSymbol ?? "XAUUSD");
+  store.symbol = symbol;
   store.updatedAt = new Date().toISOString();
 
   try {
@@ -94,8 +97,9 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
   };
 }
 
-export async function getMt5History(timeframe: Timeframe, limit: number): Promise<Mt5MarketResult<Candle[]> | null> {
-  const store = getStore();
+export async function getMt5History(timeframe: Timeframe, limit: number, symbol = "XAUUSD"): Promise<Mt5MarketResult<Candle[]> | null> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const store = getStore(normalizedSymbol);
   const candles = store.candleMap[timeframe];
 
   if (candles.length && !isStale(store.updatedAt, STALE_HISTORY_MS)) {
@@ -108,7 +112,7 @@ export async function getMt5History(timeframe: Timeframe, limit: number): Promis
     };
   }
 
-  const persistedHistory = (await readSupabaseHistory(timeframe)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe)));
+  const persistedHistory = (await readSupabaseHistory(timeframe, normalizedSymbol)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe, normalizedSymbol)));
 
   if (!persistedHistory || !persistedHistory.data.length || isStale(persistedHistory.updatedAt, STALE_HISTORY_MS)) {
     return null;
@@ -123,8 +127,9 @@ export async function getMt5History(timeframe: Timeframe, limit: number): Promis
   };
 }
 
-export async function getMt5Tick(): Promise<Mt5MarketResult<MarketTick> | null> {
-  const store = getStore();
+export async function getMt5Tick(symbol = "XAUUSD"): Promise<Mt5MarketResult<MarketTick> | null> {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const store = getStore(normalizedSymbol);
 
   if (store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS)) {
     return {
@@ -136,7 +141,7 @@ export async function getMt5Tick(): Promise<Mt5MarketResult<MarketTick> | null> 
     };
   }
 
-  const persistedTick = (await readSupabaseTick()) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey()));
+  const persistedTick = (await readSupabaseTick(normalizedSymbol)) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey(normalizedSymbol)));
 
   if (!persistedTick || isStale(persistedTick.updatedAt, STALE_TICK_MS)) {
     return null;
@@ -151,31 +156,37 @@ export async function getMt5Tick(): Promise<Mt5MarketResult<MarketTick> | null> 
   };
 }
 
-export async function getMt5Status() {
-  const store = getStore();
-  const persistedTick = (await readSupabaseTick()) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey()));
+export async function getMt5Status(symbol = "XAUUSD") {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const store = getStore(normalizedSymbol);
+  const persistedTick = (await readSupabaseTick(normalizedSymbol)) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey(normalizedSymbol)));
   const lastTick = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.lastTick : (persistedTick?.data ?? store.lastTick);
   const updatedAt = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.updatedAt : (persistedTick?.updatedAt ?? store.updatedAt);
   const source = persistedTick?.provider ?? store.source;
-  const symbol = persistedTick?.symbol ?? store.symbol;
-  const candleCounts = await getPersistedCounts(store.candleMap);
+  const responseSymbol = persistedTick?.symbol ?? store.symbol;
+  const candleCounts = await getPersistedCounts(store.candleMap, normalizedSymbol);
 
   return {
     connected: Boolean(lastTick && !isStale(updatedAt, STALE_TICK_MS)),
     persistence: getPersistenceMode(),
     source,
-    symbol,
+    symbol: responseSymbol,
     updatedAt,
     candleCounts,
     lastTick,
   };
 }
 
-function getStore() {
+function getStore(symbol = "XAUUSD") {
   const globalStore = globalThis as Mt5BridgeGlobal;
+  const normalizedSymbol = normalizeSymbol(symbol);
 
-  if (!globalStore.__tradetsrMt5Store) {
-    globalStore.__tradetsrMt5Store = {
+  if (!globalStore.__tradetsrMt5Stores) {
+    globalStore.__tradetsrMt5Stores = {};
+  }
+
+  if (!globalStore.__tradetsrMt5Stores[normalizedSymbol]) {
+    globalStore.__tradetsrMt5Stores[normalizedSymbol] = {
       candleMap: timeframes.reduce(
         (accumulator, timeframe) => ({
           ...accumulator,
@@ -185,12 +196,16 @@ function getStore() {
       ),
       lastTick: null,
       source: "MT5",
-      symbol: "XAUUSD",
+      symbol: normalizedSymbol,
       updatedAt: null,
     };
+
+    if (normalizedSymbol === "XAUUSD") {
+      globalStore.__tradetsrMt5Store = globalStore.__tradetsrMt5Stores[normalizedSymbol];
+    }
   }
 
-  return globalStore.__tradetsrMt5Store;
+  return globalStore.__tradetsrMt5Stores[normalizedSymbol];
 }
 
 function getCounts(candleMap: Record<Timeframe, Candle[]>) {
@@ -222,7 +237,7 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
     writes.push(writeSupabaseTick({ data: tick, provider: store.source, symbol: store.symbol, updatedAt: store.updatedAt }));
     writes.push(
       writeRedisJson(
-        redisTickKey(),
+        redisTickKey(store.symbol),
         {
           data: tick,
           provider: store.source,
@@ -246,7 +261,7 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
     writes.push(writeSupabaseHistory(historyPayload));
     writes.push(
       writeRedisJson(
-        redisHistoryKey(timeframe),
+        redisHistoryKey(timeframe, store.symbol),
         historyPayload,
         REDIS_HISTORY_TTL_SECONDS,
       ),
@@ -256,14 +271,14 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
   await Promise.all(writes);
 }
 
-async function getPersistedCounts(candleMap: Record<Timeframe, Candle[]>) {
+async function getPersistedCounts(candleMap: Record<Timeframe, Candle[]>, symbol: string) {
   if (!isSupabaseConfigured() && !isRedisConfigured()) {
     return getCounts(candleMap);
   }
 
   const entries = await Promise.all(
     timeframes.map(async (timeframe) => {
-      const persisted = (await readSupabaseHistory(timeframe)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe)));
+      const persisted = (await readSupabaseHistory(timeframe, symbol)) ?? (await readRedisJson<Mt5RedisHistoryPayload>(redisHistoryKey(timeframe, symbol)));
       return [timeframe, persisted?.data.length ?? candleMap[timeframe].length] as const;
     }),
   );
@@ -277,12 +292,17 @@ async function getPersistedCounts(candleMap: Record<Timeframe, Candle[]>) {
   );
 }
 
-function redisTickKey() {
-  return `${REDIS_KEY_PREFIX}:tick`;
+function redisTickKey(symbol = "XAUUSD") {
+  return `${REDIS_KEY_PREFIX}:${storageId(symbol)}:tick`;
 }
 
-function redisHistoryKey(timeframe: Timeframe) {
-  return `${REDIS_KEY_PREFIX}:history:${timeframe}`;
+function redisHistoryKey(timeframe: Timeframe, symbol = "XAUUSD") {
+  return `${REDIS_KEY_PREFIX}:${storageId(symbol)}:history:${timeframe}`;
+}
+
+function storageId(symbol: string) {
+  const normalized = normalizeSymbol(symbol);
+  return normalized === "XAUUSD" ? SUPABASE_TICK_ID : normalized.toLowerCase();
 }
 
 function isRedisConfigured() {
@@ -340,7 +360,7 @@ async function writeSupabaseTick(payload: Mt5RedisTickPayload) {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({
-      id: SUPABASE_TICK_ID,
+      id: storageId(payload.symbol),
       source: payload.provider,
       symbol: payload.symbol,
       tick: payload.data,
@@ -358,7 +378,7 @@ async function writeSupabaseHistory(payload: Mt5RedisHistoryPayload) {
     method: "POST",
     headers: { Prefer: "resolution=merge-duplicates" },
     body: JSON.stringify({
-      id: `${SUPABASE_TICK_ID}:${payload.timeframe}`,
+      id: `${storageId(payload.symbol)}:${payload.timeframe}`,
       source: payload.provider,
       symbol: payload.symbol,
       timeframe: payload.timeframe,
@@ -368,13 +388,13 @@ async function writeSupabaseHistory(payload: Mt5RedisHistoryPayload) {
   });
 }
 
-async function readSupabaseTick(): Promise<Mt5RedisTickPayload | null> {
+async function readSupabaseTick(symbol = "XAUUSD"): Promise<Mt5RedisTickPayload | null> {
   if (!isSupabaseConfigured()) {
     return null;
   }
 
   try {
-    const rows = await supabaseRequest(`${SUPABASE_TICK_TABLE}?id=eq.${encodeURIComponent(SUPABASE_TICK_ID)}&select=source,symbol,tick,updated_at&limit=1`);
+    const rows = await supabaseRequest(`${SUPABASE_TICK_TABLE}?id=eq.${encodeURIComponent(storageId(symbol))}&select=source,symbol,tick,updated_at&limit=1`);
     const row = Array.isArray(rows) ? rows[0] : null;
 
     if (!row?.tick || !row?.updated_at) {
@@ -392,13 +412,13 @@ async function readSupabaseTick(): Promise<Mt5RedisTickPayload | null> {
   }
 }
 
-async function readSupabaseHistory(timeframe: Timeframe): Promise<Mt5RedisHistoryPayload | null> {
+async function readSupabaseHistory(timeframe: Timeframe, symbol = "XAUUSD"): Promise<Mt5RedisHistoryPayload | null> {
   if (!isSupabaseConfigured()) {
     return null;
   }
 
   try {
-    const rows = await supabaseRequest(`${SUPABASE_HISTORY_TABLE}?id=eq.${encodeURIComponent(`${SUPABASE_TICK_ID}:${timeframe}`)}&select=source,symbol,timeframe,candles,updated_at&limit=1`);
+    const rows = await supabaseRequest(`${SUPABASE_HISTORY_TABLE}?id=eq.${encodeURIComponent(`${storageId(symbol)}:${timeframe}`)}&select=source,symbol,timeframe,candles,updated_at&limit=1`);
     const row = Array.isArray(rows) ? rows[0] : null;
 
     if (!Array.isArray(row?.candles) || !row?.updated_at) {

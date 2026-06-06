@@ -9,9 +9,11 @@ export function OPTIONS() {
   return bridgeOptionsResponse();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const symbol = new URL(request.url).searchParams.get("symbol") ?? "XAUUSD";
+
   try {
-    const result = await fetchMarketTick();
+    const result = await fetchMarketTick(symbol);
 
     return NextResponse.json(
       {
@@ -26,9 +28,9 @@ export async function GET() {
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Tick XAUUSD indisponible.",
+        error: error instanceof Error ? error.message : `Tick ${symbol} indisponible.`,
         source: "unavailable",
-        symbol: "XAUUSD",
+        symbol,
         updatedAt: new Date().toISOString(),
         tick: null,
       },

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, Signal, SignalMode, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -17,6 +17,7 @@ import { useFundamentalContext } from "@/hooks/use-fundamental-context";
 import { useLiveXauusd } from "@/hooks/use-live-xauusd";
 import { buildLiveTimeframeAnalyses, buildLiveTradePlan, getLatestPrice } from "@/lib/analysis/live-analysis";
 import { macroContext, newsEvents } from "@/lib/static-context";
+import { getSymbolProfile, getSymbolsByCategory, normalizeSymbol } from "@/lib/symbols/profiles";
 
 const alertCooldownOptions = [
   { label: "30 sec", value: 30_000 },
@@ -33,7 +34,9 @@ const defaultAlertSettings: AlertSettings = {
 };
 
 export function MainDashboard() {
-  const live = useLiveXauusd();
+  const [selectedSymbol, setSelectedSymbol] = useState("XAUUSD");
+  const symbolProfile = useMemo(() => getSymbolProfile(selectedSymbol), [selectedSymbol]);
+  const live = useLiveXauusd(symbolProfile.symbol);
   const fundamentals = useFundamentalContext();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
@@ -48,12 +51,12 @@ export function MainDashboard() {
   const lastAlertRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread }),
-    [fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread],
+    () => buildLiveTimeframeAnalyses({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
+    [fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread],
+    () => buildLiveTradePlan({ candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -78,7 +81,7 @@ export function MainDashboard() {
   }, [alertHistory]);
 
   useEffect(() => {
-    const candidate = getTradingAlertCandidate({ alertOnWatch: alertSettings.alertOnWatch, plan, price: latestPrice });
+    const candidate = getTradingAlertCandidate({ alertOnWatch: alertSettings.alertOnWatch, plan, price: latestPrice, symbol: symbolProfile.symbol });
 
     if (!candidate || (!alertSettings.soundEnabled && !alertSettings.browserEnabled)) {
       return;
@@ -116,6 +119,7 @@ export function MainDashboard() {
     plan.stopLoss,
     plan.takeProfits,
     plan.waitReason,
+    symbolProfile.symbol,
   ]);
 
   async function requestNotificationPermission() {
@@ -137,6 +141,7 @@ export function MainDashboard() {
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1340px] px-3 py-3 sm:px-4 lg:px-5">
       <BrandHeader />
+      <SymbolSelector profile={symbolProfile} selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
       <Mt5ConnectionHeader live={live} spread={spread} />
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,1fr)]">
@@ -147,8 +152,9 @@ export function MainDashboard() {
           price={latestPrice}
           priceChange={priceChange}
           priceChangePercent={priceChangePercent}
+          symbolProfile={symbolProfile}
         />
-        <MacroPanel fundamental={fundamentals.fundamental} liveMessage={live.message} plan={plan} spread={spread} />
+        <MacroPanel fundamental={fundamentals.fundamental} liveMessage={live.message} plan={plan} spread={spread} symbolProfile={symbolProfile} />
       </section>
 
       <FinalTradingDecision activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} fundamental={fundamentals.fundamental} plan={plan} />
@@ -170,6 +176,7 @@ export function MainDashboard() {
             fvg={activeAnalysis?.fvg ?? plan.fvg}
             orb={activeAnalysis?.orb ?? plan.orb}
             plan={plan}
+            symbolProfile={symbolProfile}
             timeframe={activeTimeframe}
             onTimeframeChange={setActiveTimeframe}
           />
@@ -185,6 +192,7 @@ export function MainDashboard() {
               <BlockRow label="Entry" value={formatPrice(plan.entry)} />
               <BlockRow label="Stop loss" value={formatPrice(plan.stopLoss)} />
               <BlockRow label="Decision" value={plan.decision} />
+              <BlockRow label="Moteur" value={symbolProfile.category} />
             </ExecutionBlock>
 
             <ExecutionBlock title="Take profits" icon={<Target size={18} />}>
@@ -225,11 +233,12 @@ export function MainDashboard() {
             onSettingsChange={setAlertSettings}
             onTestSound={playAlertSound}
             settings={alertSettings}
+            symbol={symbolProfile.symbol}
           />
           <SetupPanel activeAnalysis={activeAnalysis} activeTimeframe={activeTimeframe} candleCount={activeCandles.length} plan={plan} />
           <TradeChecklist />
           <ScoreDetail activeAnalysis={activeAnalysis} analyses={timeframeAnalyses} fundamental={fundamentals.fundamental} plan={plan} price={latestPrice} spread={spread} />
-          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} />
+          <LiquidityPanel liquidity={activeAnalysis?.liquidity ?? plan.liquidity} symbol={symbolProfile.symbol} />
           <OrderBlockPanel orderBlock={activeAnalysis?.orderBlock ?? plan.orderBlock} />
           <FundamentalPanel
             apiError={fundamentals.apiError}
@@ -254,17 +263,91 @@ function BrandHeader() {
         <div className="flex min-w-0 items-center gap-3">
           <img className="size-14 shrink-0 rounded-md border border-amber-300/25 bg-black object-cover" src="/star-gold-icon.png" alt="Star Gold By TSR" />
           <div className="min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/80">Gold Trading Assistant For MT5</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300/80">Multi-symbol Trading Assistant For MT5</p>
             <h1 className="mt-1 text-2xl font-black tracking-normal text-white">Star Gold By TSR</h1>
-            <p className="mt-1 text-xs text-slate-400">XAUUSD live analysis, scalping decisions, risk control.</p>
+            <p className="mt-1 text-xs text-slate-400">Exness symbols, live analysis, educational decisions, risk control.</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 font-mono font-bold text-amber-100">XAUUSD</span>
+          <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 font-mono font-bold text-amber-100">MULTI-SYMBOL</span>
           <span className="rounded-md border border-white/10 bg-black/25 px-3 py-2 font-semibold text-slate-300">MT5 Bridge Ready</span>
         </div>
       </div>
     </header>
+  );
+}
+
+function SymbolSelector({ onSymbolChange, profile, selectedSymbol }: { onSymbolChange: (symbol: string) => void; profile: SymbolProfile; selectedSymbol: string }) {
+  const groupedSymbols = useMemo(() => getSymbolsByCategory(), []);
+  const allSymbols = useMemo(() => Object.values(groupedSymbols).flat().filter(Boolean) as SymbolProfile[], [groupedSymbols]);
+
+  function handleSymbolInput(value: string) {
+    const normalized = normalizeSymbol(value);
+    onSymbolChange(normalized || "XAUUSD");
+  }
+
+  return (
+    <section className="mb-3 rounded-md border border-white/10 bg-[#171717] px-4 py-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(240px,340px)_minmax(0,1fr)]">
+        <div>
+          <label className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500" htmlFor="symbol-select">
+            Symbole Exness
+          </label>
+          <div className="mt-2 flex gap-2">
+            <input
+              className="h-10 min-w-0 flex-1 rounded-md border border-white/10 bg-black/30 px-3 font-mono text-sm font-bold text-white outline-none transition placeholder:text-slate-600 focus:border-amber-300/45"
+              id="symbol-select"
+              list="tradetsr-symbols"
+              placeholder="XAUUSD, BTCUSD, US30..."
+              value={selectedSymbol}
+              onChange={(event) => handleSymbolInput(event.target.value)}
+            />
+            <select
+              className="h-10 rounded-md border border-white/10 bg-black/30 px-2 text-xs font-semibold text-slate-200 outline-none"
+              value={profile.symbol}
+              onChange={(event) => onSymbolChange(event.target.value)}
+            >
+              {Object.entries(groupedSymbols).map(([category, symbols]) => (
+                <optgroup key={category} label={category}>
+                  {(symbols ?? []).map((item) => (
+                    <option key={item.symbol} value={item.symbol}>
+                      {item.symbol}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+          <datalist id="tradetsr-symbols">
+            {allSymbols.map((item) => (
+              <option key={item.symbol} value={item.symbol}>
+                {item.label}
+              </option>
+            ))}
+          </datalist>
+        </div>
+
+        <div className="grid gap-2 text-xs md:grid-cols-4">
+          <SymbolInfo label="Categorie" value={profile.category} />
+          <SymbolInfo label="Volatilite" value={profile.volatility} />
+          <SymbolInfo label="Sessions" value={profile.sessions.join(" / ")} />
+          <SymbolInfo label="News" value={profile.importantNews.slice(0, 3).join(" / ")} />
+          <div className="rounded-md border border-amber-300/15 bg-amber-300/10 px-3 py-2 md:col-span-4">
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">Strategie recommandee</p>
+            <p className="mt-1 leading-5 text-amber-50">{profile.strategy}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function SymbolInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-black/25 px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">{label}</p>
+      <p className="mt-1 truncate font-semibold text-white">{value}</p>
+    </div>
   );
 }
 
@@ -319,6 +402,7 @@ function MarketSummary({
   price,
   priceChange,
   priceChangePercent,
+  symbolProfile,
 }: {
   activeAnalysis?: TimeframeAnalysis;
   latestCandle: { open: number; high: number; low: number; close: number } | null;
@@ -326,9 +410,10 @@ function MarketSummary({
   price: number;
   priceChange: number;
   priceChangePercent: number;
+  symbolProfile: SymbolProfile;
 }) {
-  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG SELL");
-  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "STRONG BUY");
+  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "SELL" || plan.decision === "STRONG SELL");
+  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "BUY" || plan.decision === "STRONG BUY");
   const scoreColor = bullish ? "#22c55e" : bearish ? "#ff333d" : "#f59e0b";
 
   return (
@@ -336,7 +421,7 @@ function MarketSummary({
       <div className="grid min-h-[188px] gap-4 md:grid-cols-[minmax(0,1fr)_260px]">
         <div className="flex flex-col justify-center">
           <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-slate-500">
-            <span>XAUUSD - Gold Spot</span>
+            <span>{symbolProfile.symbol} - {symbolProfile.label}</span>
             <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-[10px] text-slate-400">SPOT</span>
           </div>
           <div className={`mt-2 font-mono text-4xl font-bold tracking-tight ${bearish ? "text-[#ff333d]" : bullish ? "text-emerald-300" : "text-amber-200"}`}>
@@ -351,7 +436,7 @@ function MarketSummary({
             <span>L {formatPrice(latestCandle?.low)}</span>
             <span>C {formatPrice(latestCandle?.close)}</span>
           </div>
-          <p className="mt-2 text-xs text-slate-500">Source: MT5 cloud bridge, fallback marche si MT5 demarre plus lentement</p>
+          <p className="mt-2 text-xs text-slate-500">Source: MT5 cloud bridge pour {symbolProfile.symbol}. Fallback externe seulement si disponible.</p>
         </div>
 
         <div className="flex items-center gap-4 border-l border-white/10 pl-5">
@@ -382,15 +467,15 @@ function MarketSummary({
   );
 }
 
-function MacroPanel({ fundamental, liveMessage, plan, spread }: { fundamental: FundamentalContext; liveMessage: string; plan: TradePlan; spread: number | null }) {
+function MacroPanel({ fundamental, liveMessage, plan, spread, symbolProfile }: { fundamental: FundamentalContext; liveMessage: string; plan: TradePlan; spread: number | null; symbolProfile: SymbolProfile }) {
   return (
     <section className="rounded-md border border-white/10 bg-[#171717] p-3">
       <h2 className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Contexte Macro</h2>
       <div className="mt-4 space-y-3">
         <MacroRow label="DXY" value={fundamental.dxy.value ? fundamental.dxy.value.toFixed(2) : "--"} helper={formatDxyDirection(fundamental.dxy.direction)} positive={fundamental.dxy.direction === "falling"} />
-        <MacroRow label="US10Y" value={macroContext.us10yDirection} helper="impact inverse gold" positive={macroContext.us10yDirection === "Bearish"} />
+        <MacroRow label="US10Y" value={macroContext.us10yDirection} helper={symbolProfile.category === "Metals" ? "impact inverse metals" : "risk sentiment"} positive={macroContext.us10yDirection === "Bearish"} />
         <div className="border-t border-white/10 pt-3">
-          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Coherence Gold / DXY / US10Y</p>
+          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Coherence {symbolProfile.symbol} / DXY / news</p>
           <span className="mt-2 inline-flex rounded border border-emerald-300/25 bg-emerald-300/10 px-2 py-1 text-xs font-semibold text-emerald-200">Coherent</span>
         </div>
         <div className="grid grid-cols-2 gap-3 border-t border-white/10 pt-3">
@@ -411,6 +496,10 @@ function MacroPanel({ fundamental, liveMessage, plan, spread }: { fundamental: F
           <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Flux</p>
           <p className="mt-1 text-xs leading-5 text-slate-400">{liveMessage}</p>
           <p className="mt-1 font-mono text-xs text-slate-500">Spread {spread === null ? "--" : spread.toFixed(2)}</p>
+        </div>
+        <div className="border-t border-white/10 pt-3">
+          <p className="text-[11px] uppercase tracking-[0.14em] text-slate-500">Profil symbole</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">{symbolProfile.category} - {symbolProfile.strategy}</p>
         </div>
       </div>
     </section>
@@ -437,6 +526,7 @@ function Disclaimer() {
     <section className="mt-3 rounded-md border border-white/10 bg-[#121212] px-4 py-3">
       <p className="text-xs leading-5 text-slate-400">
         <span className="font-semibold text-white">Disclaimer.</span> Cette application est un outil d'aide a l'analyse. Elle ne garantit aucun resultat. Le trading comporte des risques importants. Les signaux doivent etre utilises avec une bonne gestion du risque.
+        Les decisions multi-symboles sont educatives, probabilistes et non garanties; aucune execution automatique n'est effectuee.
       </p>
     </section>
   );
@@ -594,6 +684,7 @@ function TradingAlertsPanel({
   onSettingsChange,
   onTestSound,
   settings,
+  symbol,
 }: {
   history: AlertHistoryItem[];
   notificationStatus: string;
@@ -601,6 +692,7 @@ function TradingAlertsPanel({
   onSettingsChange: (settings: AlertSettings) => void;
   onTestSound: () => void;
   settings: AlertSettings;
+  symbol: string;
 }) {
   function update<K extends keyof AlertSettings>(key: K, value: AlertSettings[K]) {
     onSettingsChange({ ...settings, [key]: value });
@@ -664,12 +756,12 @@ function TradingAlertsPanel({
                   <span className="font-mono text-xs font-bold text-white">{item.signal}</span>
                   <span className="font-mono text-[10px] text-slate-500">{formatAlertTime(item.time)}</span>
                 </div>
-                <p className="mt-1 font-mono text-xs text-slate-300">XAUUSD {formatPrice(item.price)}</p>
+                <p className="mt-1 font-mono text-xs text-slate-300">{item.symbol ?? symbol} {formatPrice(item.price)}</p>
                 <p className="mt-1 text-xs leading-5 text-slate-400">{item.reason}</p>
               </div>
             ))
           ) : (
-            <p className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-400">No alerts yet. Alerts trigger only on real actionable setups unless WATCH alerts are enabled.</p>
+            <p className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-400">No {symbol} alerts yet. Alerts trigger only on real actionable setups unless WATCH alerts are enabled.</p>
           )}
         </div>
       </div>
@@ -733,7 +825,7 @@ function formatSensitivity(sensitivity: ScalpingSensitivity) {
   return "Balanced";
 }
 
-function getTradingAlertCandidate({ alertOnWatch, plan, price }: { alertOnWatch: boolean; plan: TradePlan; price: number }): TradingAlertCandidate | null {
+function getTradingAlertCandidate({ alertOnWatch, plan, price, symbol }: { alertOnWatch: boolean; plan: TradePlan; price: number; symbol: string }): TradingAlertCandidate | null {
   const actionableSignals: Signal[] = ["BUY SCALP READY", "SELL SCALP READY", "STRONG BUY", "STRONG SELL"];
   const watchSignals: Signal[] = ["WATCH BUY", "WATCH SELL", "ORB BREAKOUT WATCH", "FVG RETEST WATCH"];
   const eligible = actionableSignals.includes(plan.decision) || (alertOnWatch && watchSignals.includes(plan.decision));
@@ -757,15 +849,16 @@ function getTradingAlertCandidate({ alertOnWatch, plan, price }: { alertOnWatch:
     price,
     reason,
     signal: plan.decision,
+    symbol,
     time: Date.now(),
   };
 
   return {
-    body: `XAUUSD | Entry ${entryZone} | SL ${formatPrice(plan.stopLoss)} | TP1 ${formatPrice(plan.takeProfits[0])} | Confidence ${Math.round(plan.score)}%`,
+    body: `${symbol} | Entry ${entryZone} | SL ${formatPrice(plan.stopLoss)} | TP1 ${formatPrice(plan.takeProfits[0])} | Confidence ${Math.round(plan.score)}%`,
     historyItem,
     id,
     reason,
-    title: `${plan.decision} - XAUUSD`,
+    title: `${plan.decision} - ${symbol}`,
   };
 }
 
@@ -870,12 +963,12 @@ function formatAlertTime(value: number) {
   return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function LiquidityPanel({ liquidity }: { liquidity: LiquidityAnalysis | null | undefined }) {
+function LiquidityPanel({ liquidity, symbol }: { liquidity: LiquidityAnalysis | null | undefined; symbol: string }) {
   if (!liquidity) {
     return (
       <section className="rounded-md border border-white/10 bg-[#171717] p-3">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-white">Analyse de Liquidite XAUUSD</h2>
+          <h2 className="text-base font-semibold text-white">Analyse de Liquidite {symbol}</h2>
           <span className="rounded border border-slate-400/20 bg-slate-400/10 px-2 py-1 font-mono text-xs text-slate-300">WAIT</span>
         </div>
         <p className="mt-3 text-sm leading-6 text-slate-400">En attente de suffisamment de bougies live pour cartographier la liquidite.</p>
@@ -903,7 +996,7 @@ function LiquidityPanel({ liquidity }: { liquidity: LiquidityAnalysis | null | u
     <section className="rounded-md border border-white/10 bg-[#171717] p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-semibold text-white">Analyse de Liquidite XAUUSD</h2>
+          <h2 className="text-base font-semibold text-white">Analyse de Liquidite {symbol}</h2>
           <p className="mt-1 text-xs text-slate-500">Session {liquidity.activeSession} - risque {liquidity.riskLevel}</p>
         </div>
         <span className={`rounded border px-2 py-1 font-mono text-xs font-semibold ${directional}`}>{liquidity.confidence}/100</span>
@@ -1074,6 +1167,7 @@ interface AlertHistoryItem {
   price: number;
   reason: string;
   signal: Signal;
+  symbol: string;
   time: number;
 }
 

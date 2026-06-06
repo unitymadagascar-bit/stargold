@@ -8,7 +8,8 @@ export function OPTIONS() {
   return bridgeOptionsResponse();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const symbol = new URL(request.url).searchParams.get("symbol") ?? "XAUUSD";
   const encoder = new TextEncoder();
   let timer: ReturnType<typeof setInterval> | null = null;
   let closed = false;
@@ -23,7 +24,7 @@ export async function GET() {
 
       const pushTick = async () => {
         try {
-          const result = await fetchMarketTick();
+          const result = await fetchMarketTick(symbol);
           send("tick", {
             source: result.provider,
             symbol: result.symbol,
@@ -34,8 +35,8 @@ export async function GET() {
         } catch (error) {
           send("market-error", {
             source: "unavailable",
-            symbol: "XAUUSD",
-            message: error instanceof Error ? error.message : "Tick XAUUSD indisponible.",
+            symbol,
+            message: error instanceof Error ? error.message : `Tick ${symbol} indisponible.`,
             updatedAt: new Date().toISOString(),
           });
         }
@@ -44,7 +45,7 @@ export async function GET() {
       send("status", {
         status: "connecting",
         source: "market-data",
-        symbol: "XAUUSD",
+        symbol,
         updatedAt: new Date().toISOString(),
       });
 

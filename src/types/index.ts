@@ -1,6 +1,22 @@
 export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
-export type Signal = "STRONG BUY" | "BUY SCALP READY" | "WATCH BUY" | "ORB BREAKOUT WATCH" | "FVG RETEST WATCH" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "STRONG SELL";
+export type Signal = "STRONG BUY" | "BUY" | "BUY SCALP READY" | "WATCH BUY" | "ORB BREAKOUT WATCH" | "FVG RETEST WATCH" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "SELL" | "STRONG SELL";
+
+export type AssetCategory = "Metals" | "Forex" | "Crypto" | "Indices" | "Energies" | "Commodities" | "Stocks";
+
+export type SymbolCode = string;
+
+export interface SymbolProfile {
+  symbol: SymbolCode;
+  label: string;
+  category: AssetCategory;
+  volatility: "low" | "medium" | "high" | "extreme";
+  sessions: string[];
+  importantNews: string[];
+  strategy: string;
+  quoteCurrency?: string;
+  spreadWarning?: number;
+}
 
 export type SignalMode = "conservative" | "scalping";
 
@@ -42,7 +58,7 @@ export interface Candle {
 }
 
 export interface MarketTick {
-  symbol: "XAUUSD";
+  symbol: SymbolCode;
   time: number;
   bid?: number;
   ask?: number;

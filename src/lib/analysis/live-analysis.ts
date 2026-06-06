@@ -223,7 +223,7 @@ export function buildLiveTradePlan({
       alerts: cryptoVisualOnly
         ? [
             "TradingView Crypto est actif pour le graphique.",
-            "Source analyse: TradingView visual mode, sans OHLC interne pour calculer un BUY/SELL automatique.",
+            "Source analyse: TradingView visual mode, sans Crypto OHLC Feed pour calculer un BUY/SELL automatique.",
             "Le moteur Crypto produira BUY / SELL / WAIT des qu'un flux OHLC crypto exploitable sera disponible.",
           ]
         : ["Aucune donnee mock n'est utilisee pour le graphique.", `Connecte un flux ${symbolProfile.symbol} temps reel pour activer le plan.`],
@@ -1110,14 +1110,14 @@ function emptyTimeframeAnalysis({
 
 function getInsufficientDataWaitReason(symbolProfile: SymbolProfile) {
   if (isTradingViewCryptoVisualProfile(symbolProfile)) {
-    return "TradingView visual mode: crypto chart active, OHLC crypto feed required for automated BUY/SELL analysis";
+    return "TradingView visual mode: crypto chart active, Crypto OHLC Feed required for automated BUY/SELL analysis";
   }
 
   return "WAIT: not enough live candles";
 }
 
 function getInsufficientDataCondition(symbolProfile: SymbolProfile) {
-  return isTradingViewCryptoVisualProfile(symbolProfile) ? "OHLC crypto feed" : "Live candles";
+  return isTradingViewCryptoVisualProfile(symbolProfile) ? "Crypto OHLC Feed" : "Live candles";
 }
 
 function isTradingViewCryptoVisualProfile(symbolProfile: SymbolProfile) {

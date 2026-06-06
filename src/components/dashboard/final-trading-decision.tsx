@@ -459,7 +459,7 @@ function translateMissingCondition(condition: string) {
     "Micro BOS/CHoCH": "Wait for a micro BOS/CHoCH.",
     "Quick rejection candle": "Wait for a rejection candle.",
     "Live MT5 candles": "Wait for live candles from MT5 or fallback market feed.",
-    "OHLC crypto feed": "TradingView affiche le marche en mode visuel; active un flux OHLC crypto interne pour calculer automatiquement BUY / SELL / WAIT.",
+    "Crypto OHLC Feed": "TradingView affiche le marche en mode visuel; le Crypto OHLC Feed doit fournir des bougies exploitables pour calculer automatiquement BUY / SELL / WAIT.",
     "Clear M1/M5 micro direction": "Wait for M1/M5 to show a clear buy or sell micro direction.",
     "Entry confirmation: rejection candle, micro BOS/CHoCH, or momentum from zone": "Wait for a rejection candle, micro BOS/CHoCH, or momentum from the zone.",
     "ATR acceptable": "Wait for ATR/volatility to become tradable.",

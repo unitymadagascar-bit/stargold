@@ -66,9 +66,9 @@ export function MainDashboard() {
   const priceChange = latestCandle && previousCandle ? latestCandle.close - previousCandle.close : 0;
   const priceChangePercent = previousCandle?.close ? (priceChange / previousCandle.close) * 100 : 0;
   const hasCryptoOhlcFeed = symbolProfile.category === "Crypto" && Object.values(live.candleMap).some((candles) => candles.length >= 30);
-  const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol) && !hasCryptoOhlcFeed && live.status !== "live";
+  const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol);
   const chartSourceLabel = cryptoTradingViewMode ? "TradingView Crypto" : "MT5 Bridge";
-  const analysisSourceLabel = symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "OHLC crypto feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
+  const analysisSourceLabel = symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "Crypto OHLC Feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
   const handleSignalModeChange = (mode: SignalMode) => {
     setSignalMode(mode);
     if (mode === "scalping" && activeTimeframe !== "M1" && activeTimeframe !== "M5") {

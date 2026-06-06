@@ -1,4 +1,5 @@
 import type { Candle, MarketTick, Timeframe } from "@/types";
+import { fetchCryptoOhlcHistory, fetchCryptoOhlcTick, getCryptoFeedSymbol, getCryptoOhlcSourceLabel } from "@/lib/market/crypto-ohlc-feed";
 import { fetchEodhdHistory, fetchEodhdTick, getEodhdRestSymbol, getEodhdSourceLabel } from "@/lib/market/eodhd-market";
 import { getMt5History, getMt5Tick } from "@/lib/market/mt5-store";
 import { fetchYahooGoldHistory, fetchYahooGoldTick, getYahooGoldSymbol, getYahooSourceLabel } from "@/lib/market/yahoo-market";
@@ -22,6 +23,27 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number, sy
       symbol: mt5.symbol,
       warning: null,
     };
+  }
+
+  const cryptoFeedSymbol = getCryptoFeedSymbol(normalizedSymbol);
+
+  if (cryptoFeedSymbol) {
+    try {
+      const data = await fetchCryptoOhlcHistory(timeframe, limit, normalizedSymbol);
+
+      if (data.length) {
+        return {
+          data,
+          provider: getCryptoOhlcSourceLabel(),
+          symbol: cryptoFeedSymbol,
+          warning: null,
+        };
+      }
+    } catch {
+      throw new Error("Graphique actif, mais analyse automatique indisponible car aucune donnee OHLC exploitable.");
+    }
+
+    throw new Error("Graphique actif, mais analyse automatique indisponible car aucune donnee OHLC exploitable.");
   }
 
   if (!isExternalFallbackEnabled()) {
@@ -66,6 +88,25 @@ export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResu
       data: mt5.data,
       provider: mt5.provider,
       symbol: mt5.symbol,
+      warning: null,
+    };
+  }
+
+  const cryptoFeedSymbol = getCryptoFeedSymbol(normalizedSymbol);
+
+  if (cryptoFeedSymbol) {
+    let data: MarketTick;
+
+    try {
+      data = await fetchCryptoOhlcTick(normalizedSymbol);
+    } catch {
+      throw new Error("Graphique actif, mais analyse automatique indisponible car aucune donnee OHLC exploitable.");
+    }
+
+    return {
+      data: { ...data, symbol: normalizedSymbol },
+      provider: getCryptoOhlcSourceLabel(),
+      symbol: cryptoFeedSymbol,
       warning: null,
     };
   }

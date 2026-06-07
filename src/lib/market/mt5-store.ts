@@ -16,6 +16,7 @@ const SUPABASE_HISTORY_TABLE = process.env.SUPABASE_MT5_HISTORY_TABLE || "mt5_ca
 type Mt5CandleMapPayload = Partial<Record<Timeframe, unknown>>;
 
 interface Mt5BridgeStore {
+  brokerSymbol: string;
   candleMap: Record<Timeframe, Candle[]>;
   lastTick: MarketTick | null;
   source: string;
@@ -37,6 +38,7 @@ export interface Mt5MarketResult<T> {
 }
 
 interface Mt5RedisTickPayload {
+  brokerSymbol?: string;
   data: MarketTick;
   provider: string;
   symbol: string;
@@ -58,13 +60,14 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
 
   const source = payload as Record<string, unknown>;
   const tick = normalizeProviderTick(source.tick ?? source);
-  const symbol = normalizeSymbol(String(source.symbol ?? source.brokerSymbol ?? tick?.symbol ?? "XAUUSD"));
+  const rawSymbol = String(source.brokerSymbol ?? source.symbol ?? tick?.symbol ?? "XAUUSD");
+  const symbol = normalizeBridgeSymbol(rawSymbol);
   const store = getStore(symbol);
   const candlesPayload = source.candles;
   const changedHistories: Timeframe[] = [];
 
   if (tick) {
-    store.lastTick = tick;
+    store.lastTick = { ...tick, symbol: normalizeSymbol(rawSymbol) };
   }
 
   if (candlesPayload && typeof candlesPayload === "object") {
@@ -79,6 +82,7 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
   }
 
   store.source = String(source.source ?? "MT5");
+  store.brokerSymbol = normalizeSymbol(rawSymbol);
   store.symbol = symbol;
   store.updatedAt = new Date().toISOString();
 
@@ -98,7 +102,7 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
 }
 
 export async function getMt5History(timeframe: Timeframe, limit: number, symbol = "XAUUSD"): Promise<Mt5MarketResult<Candle[]> | null> {
-  const normalizedSymbol = normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeBridgeSymbol(symbol);
   const store = getStore(normalizedSymbol);
   const candles = store.candleMap[timeframe];
 
@@ -128,7 +132,7 @@ export async function getMt5History(timeframe: Timeframe, limit: number, symbol 
 }
 
 export async function getMt5Tick(symbol = "XAUUSD"): Promise<Mt5MarketResult<MarketTick> | null> {
-  const normalizedSymbol = normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeBridgeSymbol(symbol);
   const store = getStore(normalizedSymbol);
 
   if (store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS)) {
@@ -157,18 +161,20 @@ export async function getMt5Tick(symbol = "XAUUSD"): Promise<Mt5MarketResult<Mar
 }
 
 export async function getMt5Status(symbol = "XAUUSD") {
-  const normalizedSymbol = normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeBridgeSymbol(symbol);
   const store = getStore(normalizedSymbol);
   const persistedTick = (await readSupabaseTick(normalizedSymbol)) ?? (await readRedisJson<Mt5RedisTickPayload>(redisTickKey(normalizedSymbol)));
   const lastTick = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.lastTick : (persistedTick?.data ?? store.lastTick);
   const updatedAt = store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS) ? store.updatedAt : (persistedTick?.updatedAt ?? store.updatedAt);
   const source = persistedTick?.provider ?? store.source;
   const responseSymbol = persistedTick?.symbol ?? store.symbol;
+  const brokerSymbol = persistedTick?.brokerSymbol ?? store.brokerSymbol ?? responseSymbol;
   const candleCounts = await getPersistedCounts(store.candleMap, normalizedSymbol);
 
   return {
     connected: Boolean(lastTick && !isStale(updatedAt, STALE_TICK_MS)),
     persistence: getPersistenceMode(),
+    brokerSymbol,
     source,
     symbol: responseSymbol,
     updatedAt,
@@ -179,7 +185,7 @@ export async function getMt5Status(symbol = "XAUUSD") {
 
 function getStore(symbol = "XAUUSD") {
   const globalStore = globalThis as Mt5BridgeGlobal;
-  const normalizedSymbol = normalizeSymbol(symbol);
+  const normalizedSymbol = normalizeBridgeSymbol(symbol);
 
   if (!globalStore.__tradetsrMt5Stores) {
     globalStore.__tradetsrMt5Stores = {};
@@ -187,6 +193,7 @@ function getStore(symbol = "XAUUSD") {
 
   if (!globalStore.__tradetsrMt5Stores[normalizedSymbol]) {
     globalStore.__tradetsrMt5Stores[normalizedSymbol] = {
+      brokerSymbol: normalizedSymbol,
       candleMap: timeframes.reduce(
         (accumulator, timeframe) => ({
           ...accumulator,
@@ -239,6 +246,7 @@ async function persistStoreUpdate({ changedHistories, store, tick }: { changedHi
       writeRedisJson(
         redisTickKey(store.symbol),
         {
+          brokerSymbol: store.brokerSymbol,
           data: tick,
           provider: store.source,
           symbol: store.symbol,
@@ -301,7 +309,7 @@ function redisHistoryKey(timeframe: Timeframe, symbol = "XAUUSD") {
 }
 
 function storageId(symbol: string) {
-  const normalized = normalizeSymbol(symbol);
+  const normalized = normalizeBridgeSymbol(symbol);
   return normalized === "XAUUSD" ? SUPABASE_TICK_ID : normalized.toLowerCase();
 }
 
@@ -401,8 +409,11 @@ async function readSupabaseTick(symbol = "XAUUSD"): Promise<Mt5RedisTickPayload 
       return null;
     }
 
+    const tick = row.tick as MarketTick;
+
     return {
-      data: row.tick as MarketTick,
+      data: tick,
+      brokerSymbol: String(tick.symbol ?? row.symbol ?? "XAUUSD"),
       provider: String(row.source ?? "MT5"),
       symbol: String(row.symbol ?? "XAUUSD"),
       updatedAt: String(row.updated_at),
@@ -410,6 +421,33 @@ async function readSupabaseTick(symbol = "XAUUSD"): Promise<Mt5RedisTickPayload 
   } catch {
     return null;
   }
+}
+
+function normalizeBridgeSymbol(symbol: string) {
+  const normalized = normalizeSymbol(symbol);
+  const knownBase = [
+    "XAUUSD",
+    "XAGUSD",
+    "BTCUSD",
+    "ETHUSD",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "US30",
+    "NAS100",
+    "SPX500",
+    "USOIL",
+    "UKOIL",
+    "AMZN",
+    "TSLA",
+    "AAPL",
+    "NVDA",
+    "MSFT",
+    "META",
+    "GOOGL",
+  ].sort((a, b) => b.length - a.length);
+  const match = knownBase.find((base) => normalized === base || normalized.startsWith(base));
+  return match ?? normalized;
 }
 
 async function readSupabaseHistory(timeframe: Timeframe, symbol = "XAUUSD"): Promise<Mt5RedisHistoryPayload | null> {

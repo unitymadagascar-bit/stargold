@@ -79,7 +79,7 @@ void PushTick()
 string TickToJson(const MqlTick &tick)
 {
    string json = "{";
-   json += "\"symbol\":\"XAUUSD\",";
+   json += "\"symbol\":\"" + JsonEscape(_Symbol) + "\",";
    json += "\"time\":" + IntegerToString((long)tick.time_msc) + ",";
    json += "\"bid\":" + DoubleToString(tick.bid, _Digits) + ",";
    json += "\"ask\":" + DoubleToString(tick.ask, _Digits) + ",";

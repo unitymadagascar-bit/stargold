@@ -71,7 +71,8 @@ Si l'application affiche encore `MT5 non connecte`, verifie :
 - l'URL WebRequest `https://tradetsr.vercel.app` autorisee dans MT5 ;
 - le bouton `Algo Trading` ;
 - l'onglet `Experts` dans MT5 pour les erreurs WebRequest ;
-- que l'Expert Advisor utilise bien l'endpoint `https://tradetsr.vercel.app/api/market/mt5/ingest`.
+- que l'Expert Advisor utilise bien l'endpoint `https://tradetsr.vercel.app/api/market/mt5/ingest` ;
+- la page diagnostic `https://tradetsr.vercel.app/settings/mt5-connection` pour verifier le symbole broker, le dernier tick et la source active.
 
 ## Demarrage Windows
 

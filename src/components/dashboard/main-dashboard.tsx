@@ -282,6 +282,9 @@ function BrandHeader() {
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 font-mono font-bold text-amber-100">MULTI-SYMBOL</span>
           <span className="rounded-md border border-white/10 bg-black/25 px-3 py-2 font-semibold text-slate-300">MT5 Bridge Ready</span>
+          <a className="rounded-md border border-sky-300/20 bg-sky-300/10 px-3 py-2 font-semibold text-sky-100 transition hover:bg-sky-300/15" href="/settings/mt5-connection">
+            Parametres MT5
+          </a>
         </div>
       </div>
     </header>

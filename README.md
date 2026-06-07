@@ -100,6 +100,30 @@ The dashboard header shows:
 
 If the source is not MT5, the app labels it `Fallback, not live MT5`. Fallback data is only there to avoid an empty screen while MT5 is closed or reconnecting. Trading decisions should be made from live MT5 data.
 
+## MT5 connection diagnostics
+
+Open:
+
+```text
+https://tradetsr.vercel.app/settings/mt5-connection
+```
+
+Use this page when moving to a new PC or broker terminal. It shows:
+
+- MT5 connected / disconnected
+- last received price and timestamp
+- requested app symbol
+- detected broker symbol and suffix, for example `XAUUSD`, `XAUUSDm`, `BTCUSDm`
+- active data source: MT5, external API or fallback
+- one-click connection test
+- diagnostics for MT5 not launched, EA inactive, wrong symbol, no tick received, API inaccessible and price not synchronized with the chart
+
+For a new PC, install MT5, log in to Exness, attach `TradeTSRBridge` to the broker symbol, enable Algo Trading, allow `https://tradetsr.vercel.app` in MT5 WebRequest settings, and keep the EA endpoint as:
+
+```text
+https://tradetsr.vercel.app/api/market/mt5/ingest
+```
+
 ## Windows startup
 
 Edit `scripts/start-star-gold-mt5.bat` if your MT5 path is different, then run:

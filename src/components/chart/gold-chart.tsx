@@ -717,10 +717,12 @@ export function GoldChart({
         </button>
       </div>
 
+      {showTradingViewFallback ? <TradingViewFallbackNotice analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbolProfile={symbolProfile} /> : null}
+
       <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
         {syncState.status !== "SYNC OK" ? <SyncWarning syncState={syncState} /> : null}
         <div ref={containerRef} className="h-full w-full" />
-        {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
+        {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
         {orderBlockOverlay ? <OrderBlockSchematic overlay={orderBlockOverlay} /> : null}
         {fvgOverlay ? (
           <div
@@ -1028,15 +1030,34 @@ function SyncWarning({
   );
 }
 
-function TradingViewFallbackChart({
+function TradingViewFallbackNotice({
   analysisSourceLabel,
   fallbackHint,
+  symbolProfile,
+}: {
+  analysisSourceLabel: string;
+  fallbackHint: string;
+  symbolProfile: SymbolProfile;
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-sky-300/20 bg-[#07111f] px-3 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.22)]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView Crypto</p>
+      <p className="mt-1 text-xs leading-5 text-slate-200">
+        {symbolProfile.symbol} affiche TradingView Crypto. Les signaux sont bases sur Crypto OHLC Feed quand les bougies internes sont disponibles et restent educatifs/probabilistes.
+      </p>
+      <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.12em]">
+        <span className="rounded border border-violet-300/20 bg-violet-300/10 px-2 py-0.5 text-violet-100">Source analyse : {analysisSourceLabel}</span>
+        <span className="rounded border border-white/10 bg-white/[0.04] px-2 py-0.5 text-slate-300">{fallbackHint}</span>
+      </div>
+    </div>
+  );
+}
+
+function TradingViewFallbackChart({
   symbol,
   symbolProfile,
   timeframe,
 }: {
-  analysisSourceLabel: string;
-  fallbackHint: string;
   symbol: string;
   symbolProfile: SymbolProfile;
   timeframe: Timeframe;
@@ -1051,14 +1072,6 @@ function TradingViewFallbackChart({
         src={src}
         title={`TradingView fallback ${symbolProfile.symbol}`}
       />
-      <div className="pointer-events-none absolute left-3 top-3 max-w-[calc(100%-1.5rem)] rounded-md border border-sky-300/25 bg-[#07111f]/90 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView Crypto</p>
-        <p className="mt-1 text-xs leading-5 text-slate-200">
-          {symbolProfile.symbol} affiche TradingView Crypto. Les signaux sont bases sur Crypto OHLC Feed quand les bougies internes sont disponibles et restent educatifs/probabilistes.
-        </p>
-        <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100">Source analyse : {analysisSourceLabel}</p>
-        <p className="mt-1 text-[11px] leading-4 text-slate-400">{fallbackHint}</p>
-      </div>
     </div>
   );
 }

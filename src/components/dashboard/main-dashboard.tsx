@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -18,6 +18,7 @@ import { useLiveXauusd } from "@/hooks/use-live-xauusd";
 import { buildLiveTimeframeAnalyses, buildLiveTradePlan, getLatestPrice } from "@/lib/analysis/live-analysis";
 import { macroContext, newsEvents } from "@/lib/static-context";
 import { getSymbolProfile, getSymbolsByCategory, normalizeSymbol } from "@/lib/symbols/profiles";
+import { defaultRiskSettings, normalizeRiskSettings } from "@/lib/risk/risk";
 
 const alertCooldownOptions = [
   { label: "30 sec", value: 30_000 },
@@ -45,6 +46,7 @@ export function MainDashboard() {
   const [orbRequireRetest, setOrbRequireRetest] = useState(false);
   const [movingAverageType, setMovingAverageType] = useState<MovingAverageType>("EMA");
   const [movingAveragePeriod, setMovingAveragePeriod] = useState(50);
+  const [riskSettings, setRiskSettingsState] = useState<RiskSettings>(() => loadRiskSettings());
   const [alertSettings, setAlertSettings] = useState<AlertSettings>(() => loadAlertSettings());
   const [alertHistory, setAlertHistory] = useState<AlertHistoryItem[]>(() => loadAlertHistory());
   const [notificationStatus, setNotificationStatus] = useState("Checking browser notification support...");
@@ -62,8 +64,8 @@ export function MainDashboard() {
     [fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -86,6 +88,10 @@ export function MainDashboard() {
   useEffect(() => {
     window.localStorage.setItem("tradetsr-alert-settings", JSON.stringify(alertSettings));
   }, [alertSettings]);
+
+  useEffect(() => {
+    window.localStorage.setItem("tradetsr-risk-settings", JSON.stringify(riskSettings));
+  }, [riskSettings]);
 
   useEffect(() => {
     window.localStorage.setItem("tradetsr-alert-history", JSON.stringify(alertHistory.slice(0, 20)));
@@ -141,6 +147,10 @@ export function MainDashboard() {
           ? "Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app."
           : "Notification permission was not granted yet.",
     );
+  }
+
+  function setRiskSettings(settings: RiskSettings) {
+    setRiskSettingsState(normalizeRiskSettings(settings));
   }
 
   return (
@@ -260,7 +270,7 @@ export function MainDashboard() {
             onRemoveManualEvent={fundamentals.removeManualEvent}
             onUpdateDxy={fundamentals.updateDxy}
           />
-          <RiskPanel plan={plan} />
+          <RiskPanel plan={plan} settings={riskSettings} onSettingsChange={setRiskSettings} />
         </aside>
       </section>
     </main>
@@ -990,6 +1000,19 @@ function loadAlertSettings(): AlertSettings {
     return saved ? { ...defaultAlertSettings, ...JSON.parse(saved) } : defaultAlertSettings;
   } catch {
     return defaultAlertSettings;
+  }
+}
+
+function loadRiskSettings(): RiskSettings {
+  if (typeof window === "undefined") {
+    return defaultRiskSettings;
+  }
+
+  try {
+    const saved = window.localStorage.getItem("tradetsr-risk-settings");
+    return normalizeRiskSettings(saved ? JSON.parse(saved) : defaultRiskSettings);
+  } catch {
+    return defaultRiskSettings;
   }
 }
 

@@ -78,8 +78,10 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
           <DecisionTile label="Spread / news" value={final.safetyStatus} />
           <DecisionTile label="Partial TP" value={final.partialTakeProfit} />
           <DecisionTile label="Break-even rule" value={final.breakEvenRule} />
+          <DecisionTile label="Lot capital-aware" value={plan.lotSize ? plan.lotSize.toFixed(2) : "--"} />
+          <DecisionTile label="Risque compte" value={`$${plan.accountRisk.maxLoss.toFixed(2)} / jour $${plan.accountRisk.maxDailyLoss.toFixed(2)}`} />
           <DecisionTile label="Invalidation" value={final.invalidation} wide />
-          <DecisionTile label="Risk level" value={final.riskLevel} tone={final.riskTone} />
+          <DecisionTile label="Risk level" value={plan.accountRisk.riskWarning ?? final.riskLevel} tone={plan.accountRisk.riskWarning ? "danger" : final.riskTone} />
         </div>
 
         <aside className="rounded-md border border-white/10 bg-black/25 p-3">

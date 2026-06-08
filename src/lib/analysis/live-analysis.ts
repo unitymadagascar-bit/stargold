@@ -9,6 +9,8 @@ import type {
   ScalpingSensitivity,
   Signal,
   SignalMode,
+  RiskSettings,
+  AccountRiskSummary,
   SymbolProfile,
   TechnicalAnalysis,
   Timeframe,
@@ -25,7 +27,7 @@ import { detectOrbAnalysis } from "@/lib/analysis/orb";
 import { getAnalysisEngine, type SymbolAnalysisEngine } from "@/lib/analysis/symbol-engines";
 import { timeframes } from "@/lib/market/timeframes";
 import { getSymbolProfile } from "@/lib/symbols/profiles";
-import { calculateRiskReward, calculateLotSize } from "@/lib/risk/risk";
+import { buildAccountRiskSummary, calculateLotSize, calculateRiskReward, defaultRiskSettings, normalizeRiskSettings } from "@/lib/risk/risk";
 import { generateFinalDecision, inferDirection } from "@/lib/scoring/confluence";
 import { applyFundamentalDecisionGuard, calculateFundamentalDecisionScore, getDecisionStrength, hasRequiredTechnicalConfirmation } from "@/lib/fundamentals/decision-score";
 import { calculateEMA, calculateSMA, lastValue } from "@/lib/indicators";
@@ -180,6 +182,7 @@ export function buildLiveTradePlan({
   orbDuration = 30,
   orbRequireRetest = false,
   preferredTimeframe,
+  riskSettings = defaultRiskSettings,
   scalpingSensitivity = "balanced",
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
@@ -195,12 +198,14 @@ export function buildLiveTradePlan({
   orbDuration?: OrbDuration;
   orbRequireRetest?: boolean;
   preferredTimeframe?: Timeframe;
+  riskSettings?: RiskSettings;
   scalpingSensitivity?: ScalpingSensitivity;
   spread?: number | null;
   symbolProfile?: SymbolProfile;
 }): TradePlan {
   void macro;
   const analysisTimeframe = getPlanTimeframe(candleMap, mode, preferredTimeframe);
+  const normalizedRiskSettings = normalizeRiskSettings(riskSettings);
   const candles = candleMap[analysisTimeframe];
   const price = getLatestPrice(candleMap);
 
@@ -238,6 +243,7 @@ export function buildLiveTradePlan({
       fvg: null,
       orb: null,
       trendFilter: null,
+      accountRisk: buildAccountRiskSummary(normalizedRiskSettings, 0),
     };
   }
 
@@ -277,24 +283,27 @@ export function buildLiveTradePlan({
   const plannedTakeProfits = getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
   const plannedRiskReward = plannedEntry && plannedStopLoss ? calculateRiskReward(plannedEntry, plannedStopLoss, plannedTakeProfits[0]) : riskReward;
   const plannedStopDistance = Math.abs(plannedEntry - plannedStopLoss);
+  const accountRisk = buildAccountRiskSummary(normalizedRiskSettings, plannedStopDistance);
+  const riskAdjustedDecision = applyAccountRiskGuard(decision, accountRisk);
 
   return {
     direction: planDirection,
-    decision: decision.signal,
+    decision: riskAdjustedDecision.signal,
     signalMode: mode,
     scalpingSensitivity,
-    waitReason: decision.waitReason,
-    missingConditions: decision.missingConditions,
-    score: decision.confidence,
-    summary: `${summarizeDecision(decision.signal, direction, mode)} ${decision.waitReason}. ${describeOrderBlock(analysis)} ${describeOrbFvg(analysis)} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
+    waitReason: riskAdjustedDecision.waitReason,
+    missingConditions: riskAdjustedDecision.missingConditions,
+    score: riskAdjustedDecision.confidence,
+    summary: `${summarizeDecision(riskAdjustedDecision.signal, direction, mode)} ${riskAdjustedDecision.waitReason}. ${describeOrderBlock(analysis)} ${describeOrbFvg(analysis)} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
     entry: round(plannedEntry),
     stopLoss: plannedStopLoss,
     takeProfits: plannedTakeProfits,
     riskReward: Number(plannedRiskReward.toFixed(2)),
-    lotSize: calculateLotSize({ capital: 10000, riskPercent: 1, stopLossDistance: plannedStopDistance, pipValue: 10 }),
+    lotSize: calculateLotSize({ capital: normalizedRiskSettings.capital, riskPercent: normalizedRiskSettings.riskPercent, stopLossDistance: plannedStopDistance, pipValue: normalizedRiskSettings.pipValue }),
     alerts: [
-      decision.waitReason,
-      ...decision.missingConditions.map((condition) => `Missing before signal: ${condition}`),
+      riskAdjustedDecision.waitReason,
+      ...riskAdjustedDecision.missingConditions.map((condition) => `Missing before signal: ${condition}`),
+      accountRisk.riskWarning ? `Capital/risk guard: ${accountRisk.riskWarning}` : `Capital guard OK: max loss $${accountRisk.maxLoss.toFixed(2)}, lot ${calculateLotSize({ capital: normalizedRiskSettings.capital, riskPercent: normalizedRiskSettings.riskPercent, stopLossDistance: plannedStopDistance, pipValue: normalizedRiskSettings.pipValue }).toFixed(2)}.`,
       "TP1 default is RR 1:1; take partial profit at TP1.",
       "After TP1 is reached, move Stop Loss to Break Even.",
       mode === "scalping" ? "Scalping has higher risk and requires strict stop loss." : "Conservative mode requires stronger confirmation.",
@@ -311,6 +320,7 @@ export function buildLiveTradePlan({
     fvg: analysis.fvgAnalysis,
     orb: analysis.orb,
     trendFilter: analysis.trendFilter,
+    accountRisk,
   };
 }
 
@@ -378,6 +388,21 @@ function evaluateSignal({
 
 function isActionableSignal(signal: Signal) {
   return signal === "BUY" || signal === "SELL" || signal === "BUY SCALP READY" || signal === "SELL SCALP READY" || signal === "STRONG BUY" || signal === "STRONG SELL";
+}
+
+function applyAccountRiskGuard(decision: DecisionResult, accountRisk: AccountRiskSummary): DecisionResult {
+  if (accountRisk.positionAllowed || !isActionableSignal(decision.signal)) {
+    return decision;
+  }
+
+  const riskWarning = accountRisk.riskWarning ?? "Capital/risk settings must be validated before execution.";
+
+  return {
+    confidence: Math.min(decision.confidence, 49),
+    missingConditions: [riskWarning, ...decision.missingConditions],
+    signal: "WAIT",
+    waitReason: `WAIT: ${riskWarning}`,
+  };
 }
 
 function isCryptoScalpingUnsynced(symbolProfile: SymbolProfile, analysisSource: string | null) {

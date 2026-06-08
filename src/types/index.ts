@@ -345,6 +345,7 @@ export interface TradePlan {
   fvg: FvgAnalysis | null;
   orb: OrbAnalysis | null;
   trendFilter: TrendFilterAnalysis | null;
+  accountRisk: AccountRiskSummary;
 }
 
 export interface RiskInput {
@@ -352,4 +353,23 @@ export interface RiskInput {
   riskPercent: number;
   stopLossDistance: number;
   pipValue: number;
+}
+
+export interface RiskSettings {
+  capital: number;
+  maxDailyLossPercent: number;
+  minLot: number;
+  pipValue: number;
+  riskPercent: number;
+}
+
+export interface AccountRiskSummary {
+  capital: number;
+  maxDailyLoss: number;
+  maxLoss: number;
+  minLot: number;
+  pipValue: number;
+  positionAllowed: boolean;
+  riskPercent: number;
+  riskWarning: string | null;
 }

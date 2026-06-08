@@ -43,18 +43,19 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
   );
 
   function processTick(tick: MarketTick, message = `Flux ${normalizedSymbol} live connecte.`, source: string | null = null) {
-    if (tick.symbol && tick.symbol.toUpperCase() !== normalizedSymbol) {
+    if (tick.symbol && normalizeBridgeSymbol(tick.symbol) !== normalizedSymbol) {
       return;
     }
 
     const latencyMs = Math.max(0, Date.now() - tick.time * 1000);
+    const appTick = { ...tick, symbol: normalizedSymbol };
 
     setState((current) => {
       const candleMap = { ...current.candleMap };
       for (const timeframe of timeframes) {
         candleMap[timeframe] = applyTickToCandles({
           candles: current.candleMap[timeframe],
-          tick,
+          tick: appTick,
           timeframe,
           serverOffsetMinutes: current.serverOffsetMinutes,
         });
@@ -65,7 +66,7 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
         status: "live",
         message,
         source,
-        lastTick: tick,
+        lastTick: appTick,
         latencyMs,
         candleMap,
       };
@@ -352,6 +353,33 @@ function getEndpointCandidates(pathOrUrl: string) {
 
 function isLocalHost(hostname: string) {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function normalizeBridgeSymbol(symbol: string) {
+  const normalized = symbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const knownBase = [
+    "XAUUSD",
+    "XAGUSD",
+    "BTCUSD",
+    "ETHUSD",
+    "EURUSD",
+    "GBPUSD",
+    "USDJPY",
+    "US30",
+    "NAS100",
+    "SPX500",
+    "USOIL",
+    "UKOIL",
+    "AMZN",
+    "TSLA",
+    "AAPL",
+    "NVDA",
+    "MSFT",
+    "META",
+    "GOOGL",
+  ].sort((a, b) => b.length - a.length);
+
+  return knownBase.find((base) => normalized === base || normalized.startsWith(base)) ?? normalized;
 }
 
 function wait(ms: number) {

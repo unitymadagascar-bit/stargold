@@ -111,6 +111,7 @@ export function GoldChart({
   const userRangeReadyRef = useRef(false);
   const pointerScrollRef = useRef(false);
   const wheelScrollLeftRef = useRef(false);
+  const previousLatestTimeRef = useRef<number | null>(null);
 
   const latestCandle = candles.at(-1) ?? null;
   latestCandleRef.current = latestCandle;
@@ -317,7 +318,9 @@ export function GoldChart({
     }
 
     const timeframeChanged = previousTimeframeRef.current !== timeframe;
-    const historyReplaced = candles.length > previousLengthRef.current + 1;
+    const latestTime = latestCandle?.time ?? null;
+    const sameLengthNewCandle = Boolean(candles.length && candles.length === previousLengthRef.current && latestTime && previousLatestTimeRef.current && latestTime !== previousLatestTimeRef.current);
+    const historyReplaced = candles.length > previousLengthRef.current + 1 || sameLengthNewCandle;
     const shouldFollow = autoFollowRef.current || timeframeChanged || previousLengthRef.current === 0;
 
     if (timeframeChanged || historyReplaced || previousLengthRef.current === 0) {
@@ -333,6 +336,7 @@ export function GoldChart({
     }
 
     previousTimeframeRef.current = timeframe;
+    previousLatestTimeRef.current = latestTime;
     previousLengthRef.current = candles.length;
     setOhlc(latestCandle);
 

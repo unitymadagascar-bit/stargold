@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { PointerEvent, ReactNode } from "react";
 import { AlertTriangle, Crosshair, Gauge, Minus, Plus, RotateCcw, Settings2, ShieldAlert, Target, Wifi, WifiOff, Zap } from "lucide-react";
 import {
   CandlestickSeries,
@@ -43,6 +43,12 @@ const defaultDisplaySettings: ChartDisplaySettings = {
 const RIGHT_PADDING_BARS = 16;
 const MIN_VISIBLE_BARS = 24;
 const DEFAULT_VISIBLE_BARS = 95;
+const CHART_HEIGHT_STORAGE_KEY = "tradetsr-chart-height";
+const CHART_HEIGHTS = {
+  small: 300,
+  normal: 500,
+  large: 750,
+} as const;
 
 export function GoldChart({
   candleMap,
@@ -89,6 +95,9 @@ export function GoldChart({
   const [fallbackDelayElapsed, setFallbackDelayElapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoFollow, setAutoFollow] = useState(true);
+  const [chartHeight, setChartHeight] = useState(() => loadSavedChartHeight());
+  const [chartFullscreen, setChartFullscreen] = useState(false);
+  const [resizingChart, setResizingChart] = useState(false);
   const [displaySettings, setDisplaySettings] = useState<ChartDisplaySettings>(() => {
     if (typeof window === "undefined") {
       return defaultDisplaySettings;
@@ -102,6 +111,7 @@ export function GoldChart({
     }
   });
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartAreaRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const priceLineRefs = useRef<ReturnType<ISeriesApi<"Candlestick">["createPriceLine"]>[]>([]);
@@ -177,7 +187,7 @@ export function GoldChart({
 
     const chart = createChart(container, {
       autoSize: true,
-      height: 380,
+      height: CHART_HEIGHTS.normal,
       layout: {
         background: { type: ColorType.Solid, color: "#06080c" },
         textColor: "#9ca3af",
@@ -278,8 +288,40 @@ export function GoldChart({
   }, []);
 
   useEffect(() => {
+    window.localStorage.setItem(CHART_HEIGHT_STORAGE_KEY, String(chartHeight));
+  }, [chartHeight]);
+
+  useEffect(() => {
+    resizeChartToContainer();
+    const timer = window.setTimeout(() => {
+      resizeChartToContainer();
+      if (autoFollowRef.current) {
+        keepLatestCandleVisible(false);
+      }
+    }, 80);
+
+    return () => window.clearTimeout(timer);
+  }, [chartFullscreen, chartHeight]);
+
+  useEffect(() => {
     autoFollowRef.current = autoFollow;
   }, [autoFollow]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      resizeChartToContainer();
+    });
+
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const chart = chartRef.current;
@@ -636,8 +678,50 @@ export function GoldChart({
     setVisibleLogicalRange({ from: center - width / 2, to: center + width / 2 });
   }
 
+  function resizeChartToContainer() {
+    const chart = chartRef.current;
+    const container = containerRef.current;
+
+    if (!chart || !container) {
+      return;
+    }
+
+    chart.resize(container.clientWidth, container.clientHeight);
+  }
+
+  function setChartPreset(preset: ChartSizePreset) {
+    setChartFullscreen(false);
+    setChartHeight(clampChartHeight(CHART_HEIGHTS[preset]));
+  }
+
+  function startChartResize(event: PointerEvent<HTMLButtonElement>) {
+    if (chartFullscreen) {
+      return;
+    }
+
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = chartHeight;
+    setResizingChart(true);
+
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      setChartHeight(clampChartHeight(startHeight + moveEvent.clientY - startY));
+    };
+
+    const handleUp = () => {
+      setResizingChart(false);
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  }
+
+  const chartAreaHeight = chartFullscreen ? "calc(100vh - 210px)" : `${chartHeight}px`;
+
   return (
-    <section className="relative rounded-md border border-white/10 bg-[#171717] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.22)]">
+    <section className={`relative rounded-md border border-white/10 bg-[#171717] p-3 shadow-[0_20px_60px_rgba(0,0,0,0.22)] ${chartFullscreen ? "fixed inset-0 z-[100] overflow-auto rounded-none border-0" : ""}`}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
         {displaySettings.showTicker ? (
           <div className="flex items-center gap-3">
@@ -668,6 +752,20 @@ export function GoldChart({
                 </button>
               ))
             : null}
+          <div className="ml-1 flex rounded-md border border-white/10 bg-black/25 p-1">
+            <ChartSizeButton active={!chartFullscreen && chartHeight <= CHART_HEIGHTS.small + 20} label="Petit" onClick={() => setChartPreset("small")} />
+            <ChartSizeButton active={!chartFullscreen && chartHeight > CHART_HEIGHTS.small + 20 && chartHeight < CHART_HEIGHTS.large - 80} label="Normal" onClick={() => setChartPreset("normal")} />
+            <ChartSizeButton active={!chartFullscreen && chartHeight >= CHART_HEIGHTS.large - 80} label="Grand" onClick={() => setChartPreset("large")} />
+          </div>
+          <button
+            className={`h-8 rounded border px-3 text-xs font-semibold transition ${
+              chartFullscreen ? "border-rose-300/35 bg-rose-300/15 text-rose-100" : "border-sky-300/25 bg-sky-300/10 text-sky-100 hover:bg-sky-300/15"
+            }`}
+            type="button"
+            onClick={() => setChartFullscreen((value) => !value)}
+          >
+            {chartFullscreen ? "Quitter plein écran" : "Plein écran"}
+          </button>
           <div className="relative">
             <IconButton label="Options d'affichage" onClick={() => setSettingsOpen((value) => !value)}>
               <Settings2 size={16} />
@@ -749,7 +847,11 @@ export function GoldChart({
 
       {showTradingViewFallback ? <TradingViewFallbackNotice analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbolProfile={symbolProfile} /> : null}
 
-      <div className="relative mt-3 h-[380px] w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c]">
+      <div
+        ref={chartAreaRef}
+        className={`relative mt-3 w-full overflow-hidden rounded-md border border-white/10 bg-[#06080c] ${resizingChart ? "select-none ring-1 ring-amber-300/35" : ""}`}
+        style={{ height: chartAreaHeight, maxHeight: chartFullscreen ? "none" : "90vh", minHeight: CHART_HEIGHTS.small }}
+      >
         {syncState.status !== "SYNC OK" ? <SyncWarning syncState={syncState} /> : null}
         <div ref={containerRef} className="h-full w-full" />
         {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
@@ -777,6 +879,16 @@ export function GoldChart({
         {!showTradingViewFallback && !riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
         {!candles.length && displaySettings.showEmptyHelper && !showTradingViewFallback ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} marketClosed={marketClosed} plan={plan} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
       </div>
+      {!chartFullscreen ? (
+        <button
+          aria-label="Redimensionner le graphique"
+          className="group hidden h-6 w-full cursor-ns-resize items-center justify-center rounded-b-md border-x border-b border-white/10 bg-black/25 transition hover:bg-white/[0.05] md:flex"
+          type="button"
+          onPointerDown={startChartResize}
+        >
+          <span className="h-1 w-16 rounded-full bg-slate-600 transition group-hover:bg-amber-300" />
+        </button>
+      ) : null}
 
       {displaySettings.showRsi ? <RsiPanel rsi={currentRsi} values={rsiSeries} /> : null}
 
@@ -1569,6 +1681,34 @@ interface ChartDisplaySettings {
   showRiskRewardBox: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;
+}
+
+type ChartSizePreset = keyof typeof CHART_HEIGHTS;
+
+function loadSavedChartHeight() {
+  if (typeof window === "undefined") {
+    return CHART_HEIGHTS.normal;
+  }
+
+  const saved = Number(window.localStorage.getItem(CHART_HEIGHT_STORAGE_KEY));
+  return clampChartHeight(Number.isFinite(saved) && saved > 0 ? saved : CHART_HEIGHTS.normal);
+}
+
+function clampChartHeight(value: number) {
+  const viewportMax = typeof window === "undefined" ? 900 : Math.floor(window.innerHeight * 0.9);
+  return Math.max(CHART_HEIGHTS.small, Math.min(Math.max(CHART_HEIGHTS.small, viewportMax), Math.round(value)));
+}
+
+function ChartSizeButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      className={`h-6 rounded px-2 text-[11px] font-semibold transition ${active ? "bg-amber-200 text-black" : "text-slate-400 hover:bg-white/[0.06] hover:text-slate-200"}`}
+      type="button"
+      onClick={onClick}
+    >
+      {label}
+    </button>
+  );
 }
 
 function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {

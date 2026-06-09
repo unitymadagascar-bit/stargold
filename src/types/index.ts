@@ -52,6 +52,8 @@ export type MarketPhase =
 
 export type EntryState = "zone-detected" | "setup-forming" | "confirmed-entry";
 
+export type SignalTimingLevel = "none" | "pre-signal" | "confirmed" | "late";
+
 export type Trend = "bullish" | "bearish" | "range";
 
 export type StructureState = "bullish" | "bearish" | "range" | "BOS" | "CHoCH";
@@ -393,6 +395,7 @@ export interface MarketScenarioArrow {
 export interface MarketScenario {
   phase: MarketPhase;
   entryState: EntryState;
+  signalTiming: SignalTimingLevel;
   primaryBias: "Buy" | "Sell" | "Neutral";
   pricePosition: string;
   quickScenario: string;
@@ -405,6 +408,8 @@ export interface MarketScenario {
   shortExplanation: string;
   detailedExplanation: string;
   confidence: number;
+  movementProgress: number;
+  lateReason: string | null;
   buyZone: MarketScenarioZone;
   sellZone: MarketScenarioZone;
   waitZone: MarketScenarioZone;

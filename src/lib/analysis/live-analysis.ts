@@ -583,6 +583,7 @@ function buildMarketScenario({
   const rejection = directionForScore === "Bullish" ? bullishRejection : directionForScore === "Bearish" ? bearishRejection : false;
   const momentum = directionForScore === "Bullish" ? bullishMomentum : directionForScore === "Bearish" ? bearishMomentum : false;
   const mtfCount = directionForScore === "Bullish" ? mtfBullish : directionForScore === "Bearish" ? mtfBearish : 0;
+  const timing = evaluateSignalTiming({ analysis, bearishMomentum, bearishRejection, bullishMomentum, bullishRejection, candles, direction: directionForScore, price, recentHigh, recentLow, riskReward });
   const zoneScore = insideBuyZone || insideSellZone ? 20 : nearBuyZone || nearSellZone ? 10 : inMiddleZone ? -20 : 0;
   const structureAgrees = directionForScore !== "Neutral" && inferDirection(analysis) === directionForScore;
   const bosChoChAgrees = (directionForScore === "Bullish" && analysis.structure === "BOS") || (directionForScore === "Bearish" && analysis.structure === "CHoCH");
@@ -631,13 +632,13 @@ function buildMarketScenario({
     directionForScore !== "Neutral" && mtfCount === 0 ? "Timeframes contradictoires" : null,
   ].filter(Boolean) as string[];
   const entryState: MarketScenario["entryState"] =
-    phaseBias !== "Neutral" && rejection && riskReward >= 1 && (insideBuyZone || insideSellZone || retest) && !highRisk
+    timing.signalTiming === "confirmed" && phaseBias !== "Neutral" && rejection && riskReward >= 1 && (insideBuyZone || insideSellZone || retest) && !highRisk
       ? "confirmed-entry"
-      : phaseBias !== "Neutral" && (nearBuyZone || nearSellZone || insideBuyZone || insideSellZone || phase === "breakout" || phase === "retest")
+      : phaseBias !== "Neutral" && (timing.signalTiming === "pre-signal" || nearBuyZone || nearSellZone || insideBuyZone || insideSellZone || phase === "breakout" || phase === "retest")
         ? "setup-forming"
         : "zone-detected";
   const requiredConfirmation = getScenarioRequiredConfirmation({ entryState, phase, primaryBias: phaseBias });
-  const quickScenario = getQuickScenarioText({ entryState, phase, primaryBias: phaseBias });
+  const quickScenario = getQuickScenarioText({ entryState, phase, primaryBias: phaseBias, signalTiming: timing.signalTiming });
   const advancedScenario = getAdvancedScenarioText({ confidence, entryState, phase, primaryBias: phaseBias });
 
   return {
@@ -652,6 +653,7 @@ function buildMarketScenario({
     detectedRisks,
     detailedExplanation: `${advancedScenario} Score ${confidence}/100. ${detectedRisks.length ? `Risques: ${detectedRisks.join(", ")}.` : "Risque principal controle, a confirmer avant execution."}`,
     entryState,
+    lateReason: timing.lateReason,
     invalidationLevel: phaseBias === "Buy" ? buyZone.low : phaseBias === "Sell" ? sellZone.high : 0,
     keyLevels: [
       { price: analysis.support, label: "Support", tone: "buy" as const },
@@ -660,12 +662,14 @@ function buildMarketScenario({
       { price: recentHigh, label: "Liquidite haute", tone: "sell" as const },
     ].filter((level) => Number.isFinite(level.price) && level.price > 0),
     missingConfirmations,
+    movementProgress: timing.movementProgress,
     phase,
     pricePosition: getPricePositionText(phase),
     primaryBias: phaseBias,
     quickScenario,
     requiredConfirmation,
     sellZone,
+    signalTiming: timing.signalTiming,
     shortExplanation: `${quickScenario} Zone detectee ne veut pas dire entree immediate; ${requiredConfirmation}.`,
     validatedConfirmations,
     waitZone,
@@ -683,18 +687,101 @@ function createEmptyMarketScenario(): MarketScenario {
     detailedExplanation: "Analyse graphique indisponible sans bougies live.",
     entryState: "zone-detected",
     invalidationLevel: 0,
+    lateReason: null,
     keyLevels: [],
     missingConfirmations: ["Bougies live"],
+    movementProgress: 0,
     phase: "high-risk",
     pricePosition: "Donnees indisponibles",
     primaryBias: "Neutral",
     quickScenario: "WAIT: aucune zone exploitable.",
     requiredConfirmation: "Recevoir des bougies live exploitables",
     sellZone: { low: 0, high: 0, label: "ZONE VENTE" },
+    signalTiming: "none",
     shortExplanation: "Aucun signal tant que le marche n'est pas lisible.",
     validatedConfirmations: [],
     waitZone: { low: 0, high: 0, label: "ATTENTE" },
   };
+}
+
+function evaluateSignalTiming({
+  analysis,
+  bearishMomentum,
+  bearishRejection,
+  bullishMomentum,
+  bullishRejection,
+  candles,
+  direction,
+  price,
+  recentHigh,
+  recentLow,
+  riskReward,
+}: {
+  analysis: TechnicalAnalysis;
+  bearishMomentum: boolean;
+  bearishRejection: boolean;
+  bullishMomentum: boolean;
+  bullishRejection: boolean;
+  candles: Candle[];
+  direction: Direction;
+  price: number;
+  recentHigh: number;
+  recentLow: number;
+  riskReward: number;
+}) {
+  const last = candles.at(-1);
+  const previous = candles.at(-2);
+  const prior = candles.slice(-16, -1);
+  const atr = Math.max(analysis.atr, price * 0.0001, 0.01);
+
+  if (!last || !previous || !prior.length || direction === "Neutral") {
+    return { lateReason: null, movementProgress: 0, signalTiming: "none" as const };
+  }
+
+  const priorLow = Math.min(...prior.map((candle) => candle.low));
+  const priorHigh = Math.max(...prior.map((candle) => candle.high));
+  const body = Math.abs(last.close - last.open);
+  const strongBearishCandle = last.close < last.open && body >= atr * 0.65;
+  const strongBullishCandle = last.close > last.open && body >= atr * 0.65;
+  const brokeLastLow = last.close < priorLow - atr * 0.08;
+  const brokeLastHigh = last.close > priorHigh + atr * 0.08;
+  const bearishStructureBreak = analysis.structure === "CHoCH" || brokeLastLow;
+  const bullishStructureBreak = analysis.structure === "BOS" || brokeLastHigh;
+  const resistanceRejection = last.high >= Math.max(analysis.resistance - atr * 0.7, priorHigh - atr * 0.7) && last.close < Math.max(analysis.resistance, priorHigh);
+  const supportRejection = last.low <= Math.min(analysis.support + atr * 0.7, priorLow + atr * 0.7) && last.close > Math.min(analysis.support, priorLow);
+  const target = direction === "Bearish" ? Math.min(analysis.support, recentLow, priorLow) : Math.max(analysis.resistance, recentHigh, priorHigh);
+  const origin = direction === "Bearish" ? Math.max(analysis.resistance, priorHigh) : Math.min(analysis.support, priorLow);
+  const totalMove = Math.max(Math.abs(origin - target), atr);
+  const traveled = direction === "Bearish" ? Math.max(0, origin - price) : Math.max(0, price - origin);
+  const movementProgress = Math.max(0, Math.min(100, Math.round((traveled / totalMove) * 100)));
+  const remainingDistance = Math.abs(price - target);
+  const targetTooClose = remainingDistance <= atr * 1.2;
+  const tooLate = movementProgress >= 60 || targetTooClose;
+  const bearishPreSignal = resistanceRejection || bearishStructureBreak || strongBearishCandle || bearishMomentum;
+  const bullishPreSignal = supportRejection || bullishStructureBreak || strongBullishCandle || bullishMomentum;
+  const bearishConfirmed = last.close < last.open && brokeLastLow && bearishMomentum && riskReward >= 1 && !targetTooClose;
+  const bullishConfirmed = last.close > last.open && brokeLastHigh && bullishMomentum && riskReward >= 1 && !targetTooClose;
+  const relevantPreSignal = direction === "Bearish" ? bearishPreSignal : bullishPreSignal;
+  const relevantConfirmed = direction === "Bearish" ? bearishConfirmed : bullishConfirmed;
+  const relevantRejection = direction === "Bearish" ? bearishRejection || resistanceRejection : bullishRejection || supportRejection;
+
+  if ((relevantPreSignal || relevantConfirmed || relevantRejection) && tooLate) {
+    return {
+      lateReason: targetTooClose ? "Prix deja proche de la liquidite cible ou support/resistance majeur." : "Le prix a deja parcouru plus de 60% du mouvement estime.",
+      movementProgress,
+      signalTiming: "late" as const,
+    };
+  }
+
+  if (relevantConfirmed && relevantRejection) {
+    return { lateReason: null, movementProgress, signalTiming: "confirmed" as const };
+  }
+
+  if (relevantPreSignal || relevantRejection) {
+    return { lateReason: null, movementProgress, signalTiming: "pre-signal" as const };
+  }
+
+  return { lateReason: null, movementProgress, signalTiming: "none" as const };
 }
 
 function evaluateQuickSignal({
@@ -760,6 +847,15 @@ function evaluateQuickSignal({
     return { confidence: Math.min(marketScenario.confidence, confidence), missingConditions, signal: "WAIT", waitReason: "WAIT: phase risque eleve" };
   }
 
+  if (marketScenario.signalTiming === "late") {
+    return {
+      confidence: Math.min(Math.max(marketScenario.confidence, confidence), 54),
+      missingConditions: [marketScenario.lateReason ?? "Signal tardif", ...missingConditions],
+      signal: "WAIT",
+      waitReason: "Signal detecte mais trop tard, entree deconseillee.",
+    };
+  }
+
   if (!volatilityOk || marketScenario.phase === "middle-zone" || marketScenario.phase === "consolidation-range" && marketScenario.entryState !== "confirmed-entry") {
     return { confidence: Math.min(marketScenario.confidence, confidence), missingConditions, signal: "WAIT", waitReason: `WAIT: ${marketScenario.quickScenario}` };
   }
@@ -770,6 +866,15 @@ function evaluateQuickSignal({
       missingConditions,
       signal: "WAIT",
       waitReason: direction === "Bullish" ? "WAIT: buy bias, but price is too close to resistance or already extended" : "WAIT: sell bias, but price is too close to support or already extended",
+    };
+  }
+
+  if (marketScenario.signalTiming === "pre-signal" && marketScenario.primaryBias !== "Neutral") {
+    return {
+      confidence: Math.max(50, Math.min(74, marketScenario.confidence || confidence)),
+      missingConditions: [marketScenario.requiredConfirmation, ...missingConditions],
+      signal: marketScenario.primaryBias === "Buy" ? "WATCH BUY" : "WATCH SELL",
+      waitReason: `Pre-signal ${marketScenario.primaryBias}: pression detectee, attendre cloture/cassure claire avant entree.`,
     };
   }
 
@@ -924,11 +1029,21 @@ function getQuickScenarioText({
   entryState,
   phase,
   primaryBias,
+  signalTiming,
 }: {
   entryState: MarketScenario["entryState"];
   phase: MarketPhase;
   primaryBias: MarketScenario["primaryBias"];
+  signalTiming: MarketScenario["signalTiming"];
 }) {
+  if (signalTiming === "late") {
+    return "Signal detecte mais trop tard, entree deconseillee.";
+  }
+
+  if (signalTiming === "pre-signal" && primaryBias !== "Neutral") {
+    return `Pre-signal ${primaryBias}: pression detectee, a confirmer.`;
+  }
+
   if (phase === "high-risk") {
     return "WAIT: phase risque eleve, scenario a confirmer.";
   }

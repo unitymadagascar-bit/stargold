@@ -306,6 +306,8 @@ function MarketScenarioPanel({ plan }: { plan: TradePlan }) {
           <SetupMetric label="Confirmation necessaire" value={scenario.requiredConfirmation} />
           <SetupMetric label="Score confiance" value={`${scenario.confidence}/100`} />
           <SetupMetric label="Etat entree" value={formatEntryState(scenario.entryState)} />
+          <SetupMetric label="Niveau signal" value={formatSignalTiming(scenario.signalTiming)} />
+          <SetupMetric label="Progression" value={`${scenario.movementProgress}%`} />
         </div>
       ) : (
         <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 2xl:grid-cols-4">
@@ -359,6 +361,22 @@ function formatEntryState(state: TradePlan["marketScenario"]["entryState"]) {
   }
 
   return "Zone detectee";
+}
+
+function formatSignalTiming(timing: TradePlan["marketScenario"]["signalTiming"]) {
+  if (timing === "pre-signal") {
+    return "Pre-signal";
+  }
+
+  if (timing === "confirmed") {
+    return "Confirme";
+  }
+
+  if (timing === "late") {
+    return "Trop tard";
+  }
+
+  return "Aucun";
 }
 
 function BrandHeader() {
@@ -950,7 +968,7 @@ function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { a
   const candidates = alertTimeframes
     .map((timeframe) => analyses.find((analysis) => analysis.timeframe === timeframe))
     .filter((analysis): analysis is TimeframeAnalysis => Boolean(analysis))
-    .filter((analysis) => directSignals.includes(analysis.signal) || (alertOnWatch && watchSignals.includes(analysis.signal)))
+    .filter((analysis) => directSignals.includes(analysis.signal) || analysis.marketScenario.signalTiming === "pre-signal" || (alertOnWatch && watchSignals.includes(analysis.signal)))
     .sort((a, b) => getAlertSignalPriority(b.signal) - getAlertSignalPriority(a.signal) || b.score - a.score);
   const analysis = candidates[0];
 
@@ -968,7 +986,8 @@ function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { a
     Math.round(price * 100),
     Math.round(analysis.score),
   ].join("|");
-  const reason = analysis.waitReason || analysis.summary;
+  const preSignal = analysis.marketScenario.signalTiming === "pre-signal";
+  const reason = preSignal ? analysis.marketScenario.shortExplanation : analysis.waitReason || analysis.summary;
   const historyItem: AlertHistoryItem = {
     id: `${id}|${Date.now()}`,
     price,
@@ -984,7 +1003,7 @@ function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { a
     historyItem,
     id,
     reason,
-    title: `${analysis.signal} ${analysis.timeframe} - ${symbol}`,
+    title: `${preSignal ? "PRE-SIGNAL" : analysis.signal} ${analysis.timeframe} - ${symbol}`,
   };
 }
 

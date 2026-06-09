@@ -876,7 +876,6 @@ export function GoldChart({
           </div>
         ) : null}
         {!showTradingViewFallback && riskRewardOverlay ? <RiskRewardBox overlay={riskRewardOverlay} /> : null}
-        {!showTradingViewFallback && !riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
         {!candles.length && displaySettings.showEmptyHelper && !showTradingViewFallback ? <ChartEmptyState connectionMessage={connectionMessage} connectionStatus={connectionStatus} marketClosed={marketClosed} plan={plan} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
       </div>
       {!chartFullscreen ? (
@@ -889,6 +888,8 @@ export function GoldChart({
           <span className="h-1 w-16 rounded-full bg-slate-600 transition group-hover:bg-amber-300" />
         </button>
       ) : null}
+
+      {!showTradingViewFallback && !riskRewardOverlay && riskRewardNotice ? <RiskRewardNotice message={riskRewardNotice} /> : null}
 
       {displaySettings.showRsi ? <RsiPanel rsi={currentRsi} values={rsiSeries} /> : null}
 
@@ -1558,9 +1559,11 @@ function RiskRewardBox({ overlay }: { overlay: RiskRewardOverlay }) {
 
 function RiskRewardNotice({ message }: { message: string }) {
   return (
-    <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[320px] rounded-md border border-amber-300/30 bg-black/75 px-3 py-2 shadow-lg">
-      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">Risk/Reward Box</p>
-      <p className="mt-1 text-xs leading-5 text-slate-100">{message}</p>
+    <div className="mt-2 rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">Risk/Reward Box</p>
+        <p className="text-xs leading-5 text-amber-50">{message}</p>
+      </div>
     </div>
   );
 }

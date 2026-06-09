@@ -20,6 +20,8 @@ export interface SymbolProfile {
 
 export type SignalMode = "conservative" | "scalping";
 
+export type AnalysisDepth = "quick" | "deep";
+
 export type ScalpingSensitivity = "safe" | "balanced" | "aggressive";
 
 export type OrbDuration = 5 | 15 | 30;
@@ -287,6 +289,7 @@ export interface TimeframeAnalysis {
   timeframe: Timeframe;
   signal: Signal;
   signalMode: SignalMode;
+  analysisDepth: AnalysisDepth;
   scalpingSensitivity: ScalpingSensitivity;
   waitReason: string;
   missingConditions: string[];
@@ -327,6 +330,7 @@ export interface ScoringBreakdown {
 export interface TradePlan {
   direction: Direction;
   decision: Signal;
+  analysisDepth: AnalysisDepth;
   directionalBias: "Buy" | "Sell" | "Neutral";
   entryConfirmation: "Confirmed" | "Not confirmed";
   entryRiskLevel: "Low" | "Medium" | "High";

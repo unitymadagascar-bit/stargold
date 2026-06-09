@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
-import type { FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { AnalysisDepth, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -41,6 +41,7 @@ export function MainDashboard() {
   const fundamentals = useFundamentalContext();
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
+  const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>("deep");
   const [scalpingSensitivity, setScalpingSensitivity] = useState<ScalpingSensitivity>("balanced");
   const [orbDuration, setOrbDuration] = useState<OrbDuration>(30);
   const [orbRequireRetest, setOrbRequireRetest] = useState(false);
@@ -60,12 +61,12 @@ export function MainDashboard() {
   const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
   const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
-    [fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
+    [analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, riskSettings, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -184,9 +185,11 @@ export function MainDashboard() {
         <aside className="order-2 space-y-3 lg:order-1">
           <SignalModePanel
             activeAnalysis={activeAnalysis}
+            analysisDepth={analysisDepth}
             mode={signalMode}
             movingAveragePeriod={movingAveragePeriod}
             movingAverageType={movingAverageType}
+            onAnalysisDepthChange={setAnalysisDepth}
             onModeChange={handleSignalModeChange}
             onMovingAveragePeriodChange={setMovingAveragePeriod}
             onMovingAverageTypeChange={setMovingAverageType}
@@ -593,9 +596,11 @@ function SetupPanel({ activeAnalysis, activeTimeframe, candleCount, plan }: { ac
 
 function SignalModePanel({
   activeAnalysis,
+  analysisDepth,
   mode,
   movingAveragePeriod,
   movingAverageType,
+  onAnalysisDepthChange,
   onModeChange,
   onMovingAveragePeriodChange,
   onMovingAverageTypeChange,
@@ -608,9 +613,11 @@ function SignalModePanel({
   sensitivity,
 }: {
   activeAnalysis?: TimeframeAnalysis;
+  analysisDepth: AnalysisDepth;
   mode: SignalMode;
   movingAveragePeriod: number;
   movingAverageType: MovingAverageType;
+  onAnalysisDepthChange: (depth: AnalysisDepth) => void;
   onModeChange: (mode: SignalMode) => void;
   onMovingAveragePeriodChange: (period: number) => void;
   onMovingAverageTypeChange: (type: MovingAverageType) => void;
@@ -640,10 +647,15 @@ function SignalModePanel({
           <ModeButton active={mode === "scalping"} label="Scalping" onClick={() => onModeChange("scalping")} />
         </div>
       </div>
+      <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-black/25 p-1">
+        <ModeButton active={analysisDepth === "quick"} label="Analyse rapide" onClick={() => onAnalysisDepthChange("quick")} />
+        <ModeButton active={analysisDepth === "deep"} label="Analyse approfondie" onClick={() => onAnalysisDepthChange("deep")} />
+      </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <SetupMetric label="Mode actif" value={mode === "scalping" ? "Scalping" : "Conservative"} />
+        <SetupMetric label="Analyse" value={analysisDepth === "quick" ? "Rapide" : "Approfondie"} />
         <SetupMetric label="Scalp status" value={scalpActive ? plan.decision : "WAIT"} />
-        <SetupMetric label="Seuils" value="WATCH 50 / READY 58" />
+        <SetupMetric label="Seuils" value={analysisDepth === "quick" ? "BUY/SELL 58" : "WATCH 50 / READY 58"} />
         <SetupMetric label="Priorite" value="M1 / M5 puis M15" />
         <SetupMetric label="Sensibilite" value={formatSensitivity(sensitivity)} />
         <SetupMetric label="ORB status" value={orb?.status ?? "WAIT"} />

@@ -25,7 +25,9 @@ export function TimeframeCard({
       <div className="flex items-start justify-between gap-2">
         <div>
           <h3 className="font-mono text-sm font-semibold text-slate-300">{analysis.timeframe}</h3>
-          <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-600">{analysis.signalMode}</p>
+          <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-slate-600">
+            {analysis.signalMode} / {analysis.analysisDepth === "quick" ? "rapide" : "approfondie"}
+          </p>
         </div>
         <SignalBadge signal={analysis.signal} />
       </div>

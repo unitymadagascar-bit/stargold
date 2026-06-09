@@ -65,6 +65,7 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <DecisionTile label="Bias directionnel" value={final.directionalBias} tone={final.biasTone} />
+          <DecisionTile label="Mode analyse" value={final.analysisModeLabel} tone={plan.analysisDepth === "quick" ? "warn" : "good"} />
           <DecisionTile label="Confirmation entree" value={final.entryConfirmation} tone={final.confirmationTone} />
           <DecisionTile label="Risque entree" value={final.entryRiskLevel} tone={final.entryRiskTone} />
           <DecisionTile label="Attendre avant entree" value={final.waitFor} wide />
@@ -195,6 +196,7 @@ function getFinalDecision({
     directionBias: getDirectionBias({ bearish, bullish, plan, signal }),
     directionTone: getDirectionTone({ bearish, bullish }),
     directionalBias: plan.directionalBias,
+    analysisModeLabel: plan.analysisDepth === "quick" ? "Analyse rapide" : "Analyse approfondie",
     biasTone: getBiasTone(plan.directionalBias),
     entryConfirmation: plan.entryConfirmation,
     confirmationTone: getConfirmationTone(plan.entryConfirmation),
@@ -502,7 +504,7 @@ function getReason({
   signal: Signal;
 }) {
   if (signal === "WAIT") {
-    return `${plan.signalReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
+    return `${plan.analysisDepth === "quick" ? "Analyse rapide" : "Analyse approfondie"}: ${plan.signalReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
   }
 
   if (signal === "ORB BREAKOUT WATCH") {

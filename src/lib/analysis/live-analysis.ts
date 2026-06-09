@@ -50,6 +50,15 @@ interface DecisionResult {
   missingConditions: string[];
 }
 
+interface EntryQualityResult {
+  bias: "Buy" | "Sell" | "Neutral";
+  blocked: boolean;
+  confirmation: "Confirmed" | "Not confirmed";
+  reason: string;
+  riskLevel: "Low" | "Medium" | "High";
+  waitFor: string;
+}
+
 interface HigherTimeframeContext {
   trend: Trend;
   strong: boolean;
@@ -217,6 +226,11 @@ export function buildLiveTradePlan({
     return {
       direction: "Neutral",
       decision: "WAIT",
+      directionalBias: "Neutral",
+      entryConfirmation: "Not confirmed",
+      entryRiskLevel: "High",
+      signalReason: waitReason,
+      waitFor: missingCondition,
       signalMode: mode,
       scalpingSensitivity,
       waitReason,
@@ -283,12 +297,19 @@ export function buildLiveTradePlan({
   const plannedTakeProfits = getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
   const plannedRiskReward = plannedEntry && plannedStopLoss ? calculateRiskReward(plannedEntry, plannedStopLoss, plannedTakeProfits[0]) : riskReward;
   const plannedStopDistance = Math.abs(plannedEntry - plannedStopLoss);
+  const entryQuality = evaluateEntryQuality({ analysis, candles, direction: planDirection });
+  const entryAdjustedDecision = applyEntryQualityGuard(decision, entryQuality);
   const accountRisk = buildAccountRiskSummary(normalizedRiskSettings, plannedStopDistance);
-  const riskAdjustedDecision = applyAccountRiskGuard(decision, accountRisk);
+  const riskAdjustedDecision = applyAccountRiskGuard(entryAdjustedDecision, accountRisk);
 
   return {
     direction: planDirection,
     decision: riskAdjustedDecision.signal,
+    directionalBias: entryQuality.bias,
+    entryConfirmation: entryQuality.confirmation,
+    entryRiskLevel: entryQuality.riskLevel,
+    signalReason: entryQuality.reason,
+    waitFor: entryQuality.waitFor,
     signalMode: mode,
     scalpingSensitivity,
     waitReason: riskAdjustedDecision.waitReason,
@@ -402,6 +423,225 @@ function applyAccountRiskGuard(decision: DecisionResult, accountRisk: AccountRis
     missingConditions: [riskWarning, ...decision.missingConditions],
     signal: "WAIT",
     waitReason: `WAIT: ${riskWarning}`,
+  };
+}
+
+function applyEntryQualityGuard(decision: DecisionResult, entryQuality: EntryQualityResult): DecisionResult {
+  if (!isActionableSignal(decision.signal)) {
+    return decision;
+  }
+
+  if (entryQuality.confirmation === "Confirmed" && !entryQuality.blocked) {
+    return decision;
+  }
+
+  return {
+    confidence: Math.min(decision.confidence, 49),
+    missingConditions: [entryQuality.waitFor, ...decision.missingConditions],
+    signal: "WAIT",
+    waitReason: `WAIT: ${entryQuality.reason}`,
+  };
+}
+
+function evaluateEntryQuality({ analysis, candles, direction }: { analysis: TechnicalAnalysis; candles: Candle[]; direction: Direction }): EntryQualityResult {
+  const bias = direction === "Bullish" ? "Buy" : direction === "Bearish" ? "Sell" : "Neutral";
+  const last = candles.at(-1);
+
+  if (!last || direction === "Neutral" || candles.length < 20) {
+    return {
+      bias,
+      blocked: true,
+      confirmation: "Not confirmed",
+      reason: "Neutral bias or insufficient candles.",
+      riskLevel: "High",
+      waitFor: "Wait for clear bias, break, FVG and retest.",
+    };
+  }
+
+  const pricePosition = evaluatePricePosition({ analysis, candles, direction });
+  const sweep = detectRecentLiquidityReversal(candles, analysis.atr);
+  const breakRetest = detectBreakRetestConfirmation(candles, analysis.atr, direction);
+  const fvgConfirmed = Boolean(
+    analysis.fvgAnalysis &&
+      fvgDirectionMatches(analysis.fvgAnalysis.direction, direction) &&
+      analysis.fvgAnalysis.touched &&
+      analysis.fvgAnalysis.rejectionConfirmed &&
+      analysis.fvgAnalysis.fillState !== "invalid" &&
+      analysis.fvgAnalysis.fillState !== "full",
+  );
+
+  const sweepBlocksSell = direction === "Bearish" && sweep.bullish;
+  const sweepBlocksBuy = direction === "Bullish" && sweep.bearish;
+  const priceBlocksSell = direction === "Bearish" && (pricePosition.nearSupport || pricePosition.extendedDown);
+  const priceBlocksBuy = direction === "Bullish" && (pricePosition.nearResistance || pricePosition.extendedUp);
+  const blocked = sweepBlocksSell || sweepBlocksBuy || priceBlocksSell || priceBlocksBuy;
+
+  if (sweepBlocksSell) {
+    return {
+      bias,
+      blocked: true,
+      confirmation: "Not confirmed",
+      reason: "Sell bias, but entry blocked. Possible bullish liquidity sweep.",
+      riskLevel: "High",
+      waitFor: "Wait for bearish break + retest.",
+    };
+  }
+
+  if (sweepBlocksBuy) {
+    return {
+      bias,
+      blocked: true,
+      confirmation: "Not confirmed",
+      reason: "Buy bias, but entry blocked. Possible bearish liquidity sweep.",
+      riskLevel: "High",
+      waitFor: "Wait for bullish break + retest.",
+    };
+  }
+
+  if (priceBlocksSell) {
+    return {
+      bias,
+      blocked: true,
+      confirmation: "Not confirmed",
+      reason: "Sell bias, but entry blocked. Price is near support or already extended down.",
+      riskLevel: "High",
+      waitFor: "Wait for bearish break + retest.",
+    };
+  }
+
+  if (priceBlocksBuy) {
+    return {
+      bias,
+      blocked: true,
+      confirmation: "Not confirmed",
+      reason: "Buy bias, but entry blocked. Price is near resistance or already extended up.",
+      riskLevel: "High",
+      waitFor: "Wait for bullish break + retest.",
+    };
+  }
+
+  if (!breakRetest.confirmed) {
+    return {
+      bias,
+      blocked,
+      confirmation: "Not confirmed",
+      reason: `${bias} bias, but entry blocked. ${breakRetest.reason}`,
+      riskLevel: "Medium",
+      waitFor: direction === "Bullish" ? "Wait for bullish break + rejected retest." : "Wait for bearish break + rejected retest.",
+    };
+  }
+
+  if (!fvgConfirmed) {
+    return {
+      bias,
+      blocked,
+      confirmation: "Not confirmed",
+      reason: `${bias} bias, but entry blocked. FVG retest with rejection is missing.`,
+      riskLevel: "Medium",
+      waitFor: direction === "Bullish" ? "Wait for bullish FVG retest + rejection." : "Wait for bearish FVG retest + rejection.",
+    };
+  }
+
+  return {
+    bias,
+    blocked: false,
+    confirmation: "Confirmed",
+    reason: `${bias} entry confirmed: break, rejected retest and FVG confirmation aligned.`,
+    riskLevel: analysis.volatility === "volatile" ? "Medium" : "Low",
+    waitFor: "Final spread/news/risk check before execution.",
+  };
+}
+
+function evaluatePricePosition({ analysis, candles, direction }: { analysis: TechnicalAnalysis; candles: Candle[]; direction: Direction }) {
+  const last = candles.at(-1);
+  const recent = candles.slice(-24);
+  const price = last?.close ?? 0;
+  const atr = Math.max(analysis.atr, price * 0.0001, 0.01);
+  const swingLow = Math.min(...recent.slice(0, -1).map((candle) => candle.low));
+  const swingHigh = Math.max(...recent.slice(0, -1).map((candle) => candle.high));
+  const range = Math.max(swingHigh - swingLow, atr);
+  const nearSupport = price <= analysis.support + atr * 0.7 || price <= swingLow + atr * 0.9;
+  const nearResistance = price >= analysis.resistance - atr * 0.7 || price >= swingHigh - atr * 0.9;
+  const extendedDown = direction === "Bearish" && swingHigh - price >= Math.max(atr * 2.8, range * 0.68);
+  const extendedUp = direction === "Bullish" && price - swingLow >= Math.max(atr * 2.8, range * 0.68);
+
+  return { extendedDown, extendedUp, nearResistance, nearSupport };
+}
+
+function detectRecentLiquidityReversal(candles: Candle[], atr: number) {
+  const recent = candles.slice(-7);
+  const previous = candles.slice(-22, -7);
+
+  if (recent.length < 2 || previous.length < 5) {
+    return { bearish: false, bullish: false };
+  }
+
+  const swingLow = Math.min(...previous.map((candle) => candle.low));
+  const swingHigh = Math.max(...previous.map((candle) => candle.high));
+
+  return recent.reduce(
+    (state, candle) => {
+      const body = Math.max(Math.abs(candle.close - candle.open), atr * 0.05, 0.01);
+      const lowerWick = Math.min(candle.open, candle.close) - candle.low;
+      const upperWick = candle.high - Math.max(candle.open, candle.close);
+      const bullishSweep = candle.low < swingLow && candle.close > swingLow && lowerWick >= body * 1.35;
+      const bearishSweep = candle.high > swingHigh && candle.close < swingHigh && upperWick >= body * 1.35;
+
+      return {
+        bearish: state.bearish || bearishSweep,
+        bullish: state.bullish || bullishSweep,
+      };
+    },
+    { bearish: false, bullish: false },
+  );
+}
+
+function detectBreakRetestConfirmation(candles: Candle[], atr: number, direction: Direction) {
+  const recent = candles.slice(-28);
+
+  if (recent.length < 12 || direction === "Neutral") {
+    return { confirmed: false, reason: "Not enough candles for break + retest confirmation." };
+  }
+
+  const search = recent.slice(8);
+
+  for (let index = 0; index < search.length; index += 1) {
+    const absoluteIndex = index + 8;
+    const candle = recent[absoluteIndex];
+    const before = recent.slice(Math.max(0, absoluteIndex - 8), absoluteIndex);
+    const level = direction === "Bullish" ? Math.max(...before.map((item) => item.high)) : Math.min(...before.map((item) => item.low));
+    const clearBreak = direction === "Bullish" ? candle.close > level + atr * 0.12 : candle.close < level - atr * 0.12;
+
+    if (!clearBreak) {
+      continue;
+    }
+
+    const after = recent.slice(absoluteIndex + 1);
+    const rejectedRetest = after.some((item) => {
+      if (direction === "Bullish") {
+        const body = Math.max(Math.abs(item.close - item.open), atr * 0.05, 0.01);
+        const lowerWick = Math.min(item.open, item.close) - item.low;
+        return item.low <= level + atr * 0.45 && item.close > level && item.close >= item.open && lowerWick >= body * 0.55;
+      }
+
+      const body = Math.max(Math.abs(item.close - item.open), atr * 0.05, 0.01);
+      const upperWick = item.high - Math.max(item.open, item.close);
+      return item.high >= level - atr * 0.45 && item.close < level && item.close <= item.open && upperWick >= body * 0.55;
+    });
+
+    if (rejectedRetest) {
+      return { confirmed: true, reason: "Break + rejected retest confirmed." };
+    }
+
+    return {
+      confirmed: false,
+      reason: direction === "Bullish" ? "Bullish break detected, but rejected retest is missing." : "Bearish break detected, but rejected retest is missing.",
+    };
+  }
+
+  return {
+    confirmed: false,
+    reason: direction === "Bullish" ? "No clear close above recent swing high yet." : "No clear close below recent swing low yet.",
   };
 }
 

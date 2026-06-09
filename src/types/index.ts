@@ -327,6 +327,11 @@ export interface ScoringBreakdown {
 export interface TradePlan {
   direction: Direction;
   decision: Signal;
+  directionalBias: "Buy" | "Sell" | "Neutral";
+  entryConfirmation: "Confirmed" | "Not confirmed";
+  entryRiskLevel: "Low" | "Medium" | "High";
+  signalReason: string;
+  waitFor: string;
   signalMode: SignalMode;
   scalpingSensitivity: ScalpingSensitivity;
   waitReason: string;

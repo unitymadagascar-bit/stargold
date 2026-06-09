@@ -64,6 +64,10 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
 
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <DecisionTile label="Bias directionnel" value={final.directionalBias} tone={final.biasTone} />
+          <DecisionTile label="Confirmation entree" value={final.entryConfirmation} tone={final.confirmationTone} />
+          <DecisionTile label="Risque entree" value={final.entryRiskLevel} tone={final.entryRiskTone} />
+          <DecisionTile label="Attendre avant entree" value={final.waitFor} wide />
           <DecisionTile label="Entry instruction" value={final.entryInstruction} wide />
           <DecisionTile label="Entry zone" value={final.entryZone} />
           <DecisionTile label="Stop loss" value={final.stopLoss} />
@@ -90,6 +94,9 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
             <p className="text-sm font-semibold">{confirmationPending ? "Confirmation attendue" : "Pourquoi ce plan"}</p>
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-300">{final.reason}</p>
+          <p className="mt-3 rounded-md border border-white/10 bg-black/20 p-3 text-sm leading-6 text-slate-200">
+            <span className="font-semibold text-white">Raison du signal:</span> {final.signalReason}
+          </p>
           {confirmationPending ? (
             <p className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-3 text-sm font-semibold leading-6 text-sky-100">
               {final.signal === "WAIT" ? "Condition manquante" : "Confirmation requise"}: {final.missingCondition}
@@ -142,8 +149,8 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || (signal !== "WAIT" && plan.direction === "Bearish");
-  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || (signal !== "WAIT" && plan.direction === "Bullish");
+  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || plan.directionalBias === "Sell" || (signal !== "WAIT" && plan.direction === "Bearish");
+  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || plan.directionalBias === "Buy" || (signal !== "WAIT" && plan.direction === "Bullish");
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
   const orb = plan.orb ?? activeAnalysis?.orb;
@@ -185,8 +192,16 @@ function getFinalDecision({
     signal,
     actionLabel: getActionLabel({ bearish, bullish, signal }),
     actionSubtitle: getActionSubtitle({ bearish, bullish, signal }),
-    directionBias: getDirectionBias({ bearish, bullish, signal }),
+    directionBias: getDirectionBias({ bearish, bullish, plan, signal }),
     directionTone: getDirectionTone({ bearish, bullish }),
+    directionalBias: plan.directionalBias,
+    biasTone: getBiasTone(plan.directionalBias),
+    entryConfirmation: plan.entryConfirmation,
+    confirmationTone: getConfirmationTone(plan.entryConfirmation),
+    entryRiskLevel: plan.entryRiskLevel,
+    entryRiskTone: getEntryRiskTone(plan.entryRiskLevel),
+    signalReason: plan.signalReason,
+    waitFor: plan.waitFor,
     nextConfirmation: getNextConfirmation({ missingCondition, signal }),
     confidence: Math.max(0, Math.min(100, Math.round(plan.score))),
     entryInstruction: getEntryInstruction({ bearish, bullish, signal }),
@@ -276,7 +291,7 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
   return "Pas d'entree maintenant. Aucun biais exploitable n'est assez clair.";
 }
 
-function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+function getDirectionBias({ bearish, bullish, plan, signal }: { bearish: boolean; bullish: boolean; plan: TradePlan; signal: Signal }) {
   if (signal === "ORB BREAKOUT WATCH") {
     return bullish ? "ORB BUY a surveiller" : bearish ? "ORB SELL a surveiller" : "ORB a surveiller";
   }
@@ -301,6 +316,14 @@ function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bull
     return "Decision forte";
   }
 
+  if (plan.directionalBias === "Buy") {
+    return "Biais actuel: BUY, entree non confirmee";
+  }
+
+  if (plan.directionalBias === "Sell") {
+    return "Biais actuel: SELL, entree non confirmee";
+  }
+
   if (bullish) {
     return "Biais actuel: BUY a confirmer";
   }
@@ -310,6 +333,34 @@ function getDirectionBias({ bearish, bullish, signal }: { bearish: boolean; bull
   }
 
   return "Biais actuel: neutre";
+}
+
+function getBiasTone(bias: TradePlan["directionalBias"]) {
+  if (bias === "Buy") {
+    return "good" as const;
+  }
+
+  if (bias === "Sell") {
+    return "danger" as const;
+  }
+
+  return "warn" as const;
+}
+
+function getEntryRiskTone(risk: TradePlan["entryRiskLevel"]) {
+  if (risk === "Low") {
+    return "good" as const;
+  }
+
+  if (risk === "Medium") {
+    return "warn" as const;
+  }
+
+  return "danger" as const;
+}
+
+function getConfirmationTone(confirmation: TradePlan["entryConfirmation"]) {
+  return confirmation === "Confirmed" ? ("good" as const) : ("warn" as const);
 }
 
 function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boolean }): DirectionTone {
@@ -451,7 +502,7 @@ function getReason({
   signal: Signal;
 }) {
   if (signal === "WAIT") {
-    return `${plan.waitReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
+    return `${plan.signalReason}. ${plan.missingConditions.length ? `Missing: ${plan.missingConditions.join(", ")}.` : "The setup still needs confirmation."}`;
   }
 
   if (signal === "ORB BREAKOUT WATCH") {

@@ -231,6 +231,8 @@ export function MainDashboard() {
             onTimeframeChange={setActiveTimeframe}
           />
 
+          <MarketScenarioPanel plan={plan} />
+
           <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
             <ExecutionBlock title="Zones cles" icon={<Activity size={18} />}>
               <BlockRow label="Support proche" value={formatPrice(activeAnalysis?.support)} />
@@ -278,6 +280,85 @@ export function MainDashboard() {
       </section>
     </main>
   );
+}
+
+function MarketScenarioPanel({ plan }: { plan: TradePlan }) {
+  const scenario = plan.marketScenario;
+  const quick = plan.analysisDepth === "quick";
+
+  return (
+    <section className={`rounded-md border ${quick ? "border-amber-300/20 bg-amber-300/10" : "border-sky-300/20 bg-sky-300/10"} p-3`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+            {quick ? "Scenario rapide du marche" : "Scenario avance du marche"}
+          </p>
+          <h3 className="mt-1 text-base font-black text-white">{quick ? scenario.quickScenario : scenario.advancedScenario}</h3>
+        </div>
+        <SignalBadge signal={plan.decision} />
+      </div>
+
+      {quick ? (
+        <div className="mt-3 grid gap-2 text-xs md:grid-cols-3">
+          <SetupMetric label="Signal actuel" value={plan.decision} />
+          <SetupMetric label="Biais principal" value={scenario.primaryBias} />
+          <SetupMetric label="Position du prix" value={scenario.pricePosition} />
+          <SetupMetric label="Confirmation necessaire" value={scenario.requiredConfirmation} />
+          <SetupMetric label="Score confiance" value={`${scenario.confidence}/100`} />
+          <SetupMetric label="Etat entree" value={formatEntryState(scenario.entryState)} />
+        </div>
+      ) : (
+        <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 2xl:grid-cols-4">
+          <SetupMetric label="Signal actuel" value={plan.decision} />
+          <SetupMetric label="Score global" value={`${scenario.confidence}/100`} />
+          <SetupMetric label="Phase du marche" value={formatMarketPhase(scenario.phase)} />
+          <SetupMetric label="Risk/reward" value={plan.riskReward ? `1:${plan.riskReward.toFixed(2)}` : "--"} />
+          <SetupMetric label="Confirmations validees" value={scenario.validatedConfirmations.slice(0, 3).join(" / ") || "--"} />
+          <SetupMetric label="Confirmations manquantes" value={scenario.missingConfirmations.slice(0, 3).join(" / ") || "--"} />
+          <SetupMetric label="Risques detectes" value={scenario.detectedRisks.slice(0, 3).join(" / ") || "Aucun risque majeur"} />
+          <SetupMetric label="Invalidation" value={scenario.invalidationLevel ? formatPrice(scenario.invalidationLevel) : "--"} />
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <p className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+          {quick ? scenario.shortExplanation : scenario.detailedExplanation}
+        </p>
+        <p className="rounded-md border border-white/10 bg-black/25 px-3 py-2 text-xs leading-5 text-slate-300">
+          <span className="font-semibold text-white">Scenario alternatif:</span> {scenario.alternativeScenario}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function formatMarketPhase(phase: TradePlan["marketScenario"]["phase"]) {
+  const labels: Record<TradePlan["marketScenario"]["phase"], string> = {
+    "breakout": "Cassure",
+    "consolidation-range": "Range / consolidation",
+    "high-risk": "Risque eleve",
+    "inside-buy-zone": "Dans zone achat",
+    "inside-sell-zone": "Dans zone vente",
+    "middle-zone": "Zone milieu",
+    "near-buy-zone": "Proche zone achat",
+    "near-sell-zone": "Proche zone vente",
+    "retest": "Retest",
+    "strong-trend": "Tendance forte",
+  };
+
+  return labels[phase];
+}
+
+function formatEntryState(state: TradePlan["marketScenario"]["entryState"]) {
+  if (state === "confirmed-entry") {
+    return "Entree confirmee";
+  }
+
+  if (state === "setup-forming") {
+    return "Setup en formation";
+  }
+
+  return "Zone detectee";
 }
 
 function BrandHeader() {

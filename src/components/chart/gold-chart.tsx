@@ -34,6 +34,7 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showRsi: true,
   showOrb: true,
   showFvg: true,
+  showScenarioAnalysis: true,
   showRiskRewardBox: true,
   showLegend: false,
   showEmptyHelper: true,
@@ -82,6 +83,7 @@ export function GoldChart({
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const [fvgOverlay, setFvgOverlay] = useState<ZoneOverlay | null>(null);
+  const [scenarioOverlay, setScenarioOverlay] = useState<ScenarioOverlay | null>(null);
   const [riskRewardOverlay, setRiskRewardOverlay] = useState<RiskRewardOverlay | null>(null);
   const [riskRewardNotice, setRiskRewardNotice] = useState<string | null>(null);
   const [fallbackDelayElapsed, setFallbackDelayElapsed] = useState(false);
@@ -424,6 +426,30 @@ export function GoldChart({
   }, [candles, displaySettings, fvg, lastPrice, lastTick?.ask, lastTick?.bid, orb, orderBlock, plan.decision, plan.entry, plan.orderBlock, plan.stopLoss, plan.takeProfits]);
 
   useEffect(() => {
+    const series = seriesRef.current;
+    const chart = chartRef.current;
+
+    if (!series || !chart || !displaySettings.showScenarioAnalysis || !candles.length) {
+      setScenarioOverlay(null);
+      return;
+    }
+
+    const updateOverlay = () => {
+      const overlay = buildScenarioOverlay({ plan, series });
+      setScenarioOverlay(overlay);
+    };
+
+    updateOverlay();
+    chart.subscribeCrosshairMove(updateOverlay);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(updateOverlay);
+
+    return () => {
+      chart.unsubscribeCrosshairMove(updateOverlay);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(updateOverlay);
+    };
+  }, [candles.length, displaySettings.showScenarioAnalysis, plan, timeframe]);
+
+  useEffect(() => {
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
     const series = seriesRef.current;
 
@@ -728,6 +754,7 @@ export function GoldChart({
         <div ref={containerRef} className="h-full w-full" />
         {showTradingViewFallback && tradingViewSymbol ? <TradingViewFallbackChart symbol={tradingViewSymbol} symbolProfile={symbolProfile} timeframe={timeframe} /> : null}
         {orderBlockOverlay ? <OrderBlockSchematic overlay={orderBlockOverlay} /> : null}
+        {scenarioOverlay ? <ScenarioVisualOverlay overlay={scenarioOverlay} /> : null}
         {fvgOverlay ? (
           <div
             className="pointer-events-none absolute inset-x-0 z-10 border-y"
@@ -806,6 +833,7 @@ function DisplaySettingsPanel({
         <DisplayToggle checked={settings.showRsi} label="Show RSI 14" onChange={(value) => update("showRsi", value)} />
         <DisplayToggle checked={settings.showOrb} label="Show ORB high/low" onChange={(value) => update("showOrb", value)} />
         <DisplayToggle checked={settings.showFvg} label="Show FVG zones" onChange={(value) => update("showFvg", value)} />
+        <DisplayToggle checked={settings.showScenarioAnalysis} label="Afficher analyse graphique" onChange={(value) => update("showScenarioAnalysis", value)} />
         <DisplayToggle checked={settings.showRiskRewardBox} label="Show Risk/Reward Box" onChange={(value) => update("showRiskRewardBox", value)} />
         <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
         <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
@@ -1135,6 +1163,174 @@ function addPriceLine(
   );
 }
 
+function buildScenarioOverlay({ plan, series }: { plan: TradePlan; series: ISeriesApi<"Candlestick"> }): ScenarioOverlay | null {
+  const scenario = plan.marketScenario;
+  const zones = [
+    buildScenarioZone(scenario.buyZone.low, scenario.buyZone.high, "ZONE ACHAT", "buy", series),
+    buildScenarioZone(scenario.sellZone.low, scenario.sellZone.high, "ZONE VENTE", "sell", series),
+    buildScenarioZone(scenario.waitZone.low, scenario.waitZone.high, "ATTENTE", "wait", series),
+  ].filter(Boolean) as ScenarioZoneOverlay[];
+  const levels = scenario.keyLevels
+    .map((level) => {
+      const y = series.priceToCoordinate(level.price);
+      return y === null ? null : { ...level, y };
+    })
+    .filter(Boolean) as ScenarioLevelOverlay[];
+
+  if (!zones.length && !levels.length) {
+    return null;
+  }
+
+  return {
+    arrow: scenario.arrow,
+    entryState: scenario.entryState,
+    levels,
+    phase: scenario.phase,
+    pricePosition: scenario.pricePosition,
+    primaryBias: scenario.primaryBias,
+    requiredConfirmation: scenario.requiredConfirmation,
+    zones,
+  };
+}
+
+function buildScenarioZone(low: number, high: number, label: string, tone: ScenarioZoneOverlay["tone"], series: ISeriesApi<"Candlestick">) {
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0 || low === high) {
+    return null;
+  }
+
+  const topPrice = Math.max(low, high);
+  const bottomPrice = Math.min(low, high);
+  const top = series.priceToCoordinate(topPrice);
+  const bottom = series.priceToCoordinate(bottomPrice);
+
+  if (top === null || bottom === null) {
+    return null;
+  }
+
+  return {
+    height: Math.max(6, Math.abs(bottom - top)),
+    label,
+    low: bottomPrice,
+    high: topPrice,
+    tone,
+    top: Math.min(top, bottom),
+  };
+}
+
+function ScenarioVisualOverlay({ overlay }: { overlay: ScenarioOverlay }) {
+  const scenarioTone =
+    overlay.primaryBias === "Buy"
+      ? "border-emerald-300/30 bg-emerald-300/10 text-emerald-100"
+      : overlay.primaryBias === "Sell"
+        ? "border-rose-300/30 bg-rose-300/10 text-rose-100"
+        : "border-slate-300/20 bg-slate-300/10 text-slate-100";
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[12]">
+      {overlay.zones.map((zone) => (
+        <div
+          key={`${zone.label}-${zone.low}-${zone.high}`}
+          className={`absolute left-0 right-0 border-y ${getScenarioZoneClass(zone.tone)}`}
+          style={{ top: zone.top, height: zone.height }}
+        >
+          <span className={`absolute left-2 top-1 rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.14em] shadow-lg ${getScenarioLabelClass(zone.tone)}`}>
+            {zone.label}
+          </span>
+        </div>
+      ))}
+
+      {overlay.levels.map((level) => (
+        <div key={`${level.label}-${level.price}`} className="absolute left-0 right-0 border-t border-dashed border-white/25" style={{ top: level.y }}>
+          <span className={`absolute right-2 -top-3 rounded px-2 py-0.5 font-mono text-[10px] font-semibold shadow-lg ${getScenarioLevelClass(level.tone)}`}>
+            {level.label} {formatPrice(level.price)}
+          </span>
+        </div>
+      ))}
+
+      <div className={`absolute left-3 top-3 max-w-[320px] rounded-md border px-3 py-2 shadow-[0_12px_38px_rgba(0,0,0,0.35)] ${scenarioTone}`}>
+        <p className="text-[10px] font-black uppercase tracking-[0.16em]">{formatScenarioPhase(overlay.phase)}</p>
+        <p className="mt-1 text-xs font-semibold leading-5">
+          {overlay.arrow.label} / {overlay.primaryBias} / {formatEntryStateLabel(overlay.entryState)}
+        </p>
+        <p className="mt-1 text-[11px] leading-4 opacity-90">{overlay.requiredConfirmation}</p>
+      </div>
+
+      <div className="absolute bottom-3 right-3 rounded-md border border-white/10 bg-black/65 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-200 shadow-lg">
+        Zone detectee != entree immediate
+      </div>
+    </div>
+  );
+}
+
+function getScenarioZoneClass(tone: ScenarioZoneOverlay["tone"]) {
+  if (tone === "buy") {
+    return "border-emerald-300/35 bg-emerald-300/12";
+  }
+
+  if (tone === "sell") {
+    return "border-rose-300/35 bg-rose-300/12";
+  }
+
+  return "border-slate-300/25 bg-slate-300/10";
+}
+
+function getScenarioLabelClass(tone: ScenarioZoneOverlay["tone"]) {
+  if (tone === "buy") {
+    return "bg-emerald-500/85 text-black";
+  }
+
+  if (tone === "sell") {
+    return "bg-rose-500/85 text-white";
+  }
+
+  return "bg-slate-500/85 text-white";
+}
+
+function getScenarioLevelClass(tone: ScenarioLevelOverlay["tone"]) {
+  if (tone === "buy") {
+    return "bg-emerald-300 text-black";
+  }
+
+  if (tone === "sell") {
+    return "bg-rose-300 text-black";
+  }
+
+  if (tone === "wait") {
+    return "bg-slate-300 text-black";
+  }
+
+  return "bg-black/75 text-white";
+}
+
+function formatScenarioPhase(phase: TradePlan["marketScenario"]["phase"]) {
+  const labels: Record<TradePlan["marketScenario"]["phase"], string> = {
+    "breakout": "CASSURE",
+    "consolidation-range": "CONSOLIDATION",
+    "high-risk": "RISQUE ELEVE",
+    "inside-buy-zone": "ZONE ACHAT",
+    "inside-sell-zone": "ZONE VENTE",
+    "middle-zone": "ATTENTE",
+    "near-buy-zone": "PROCHE ACHAT",
+    "near-sell-zone": "PROCHE VENTE",
+    "retest": "RETEST",
+    "strong-trend": "TENDANCE FORTE",
+  };
+
+  return labels[phase];
+}
+
+function formatEntryStateLabel(state: TradePlan["marketScenario"]["entryState"]) {
+  if (state === "confirmed-entry") {
+    return "ENTREE CONFIRMEE";
+  }
+
+  if (state === "setup-forming") {
+    return "SETUP EN FORMATION";
+  }
+
+  return "ZONE DETECTEE";
+}
+
 function buildRiskRewardOverlay({
   containerHeight,
   containerWidth,
@@ -1327,6 +1523,33 @@ interface RiskRewardOverlay {
   width: number;
 }
 
+interface ScenarioOverlay {
+  arrow: TradePlan["marketScenario"]["arrow"];
+  entryState: TradePlan["marketScenario"]["entryState"];
+  levels: ScenarioLevelOverlay[];
+  phase: TradePlan["marketScenario"]["phase"];
+  pricePosition: string;
+  primaryBias: TradePlan["marketScenario"]["primaryBias"];
+  requiredConfirmation: string;
+  zones: ScenarioZoneOverlay[];
+}
+
+interface ScenarioZoneOverlay {
+  height: number;
+  high: number;
+  label: string;
+  low: number;
+  tone: "buy" | "sell" | "wait";
+  top: number;
+}
+
+interface ScenarioLevelOverlay {
+  label: string;
+  price: number;
+  tone: "buy" | "sell" | "wait" | "neutral";
+  y: number;
+}
+
 interface ChartDisplaySettings {
   showTicker: boolean;
   showOhlc: boolean;
@@ -1342,6 +1565,7 @@ interface ChartDisplaySettings {
   showRsi: boolean;
   showOrb: boolean;
   showFvg: boolean;
+  showScenarioAnalysis: boolean;
   showRiskRewardBox: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;

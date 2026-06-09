@@ -3,6 +3,8 @@ import type {
   Direction,
   FundamentalContext,
   MacroContext,
+  MarketPhase,
+  MarketScenario,
   MovingAverageType,
   NewsEvent,
   OrbDuration,
@@ -63,6 +65,17 @@ interface EntryQualityResult {
 interface HigherTimeframeContext {
   trend: Trend;
   strong: boolean;
+}
+
+interface MarketScenarioInput {
+  analysis: TechnicalAnalysis;
+  candleMap: Record<Timeframe, Candle[]>;
+  candles: Candle[];
+  direction: Direction;
+  newsRisk: boolean;
+  riskReward: number;
+  spread: number | null;
+  symbolProfile: SymbolProfile;
 }
 
 export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
@@ -137,17 +150,20 @@ export function buildLiveTimeframeAnalyses({
     const analysis = analysisDepth === "quick"
       ? baseAnalysis
       : withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe });
+    const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
     const decision = analysisDepth === "quick" ? evaluateQuickSignal({
       analysis,
       candleMap,
       candles,
       direction,
+      marketScenario,
       redNewsNearby,
       riskReward,
       spread,
       symbolProfile,
-    }) : evaluateSignal({
+    }) : evaluateDepthSignal({
+      baseDecision: evaluateSignal({
       analysis,
       analysisSource,
       candles,
@@ -163,6 +179,10 @@ export function buildLiveTimeframeAnalyses({
       spread,
       symbolProfile,
       timeframe,
+      }),
+      direction,
+      marketScenario,
+      riskReward,
     });
 
     return {
@@ -189,6 +209,7 @@ export function buildLiveTimeframeAnalyses({
       fvg: analysis.fvgAnalysis,
       orb: analysis.orb,
       trendFilter: analysis.trendFilter,
+      marketScenario,
       riskReward: Number(riskReward.toFixed(2)),
       summary: `${decision.waitReason}. ${decision.missingConditions.length ? `Missing: ${decision.missingConditions.join(", ")}.` : "Conditions validees."}`,
     };
@@ -276,6 +297,7 @@ export function buildLiveTradePlan({
       fvg: null,
       orb: null,
       trendFilter: null,
+      marketScenario: createEmptyMarketScenario(),
       accountRisk: buildAccountRiskSummary(normalizedRiskSettings, 0),
     };
   }
@@ -292,17 +314,20 @@ export function buildLiveTradePlan({
   const analysis = analysisDepth === "quick"
     ? baseAnalysis
     : withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe: analysisTimeframe });
+  const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
   const decision = analysisDepth === "quick" ? evaluateQuickSignal({
     analysis,
     candleMap,
     candles,
     direction,
+    marketScenario,
     redNewsNearby,
     riskReward,
     spread,
     symbolProfile,
-  }) : evaluateSignal({
+  }) : evaluateDepthSignal({
+    baseDecision: evaluateSignal({
     analysis,
     analysisSource,
     candles,
@@ -318,6 +343,10 @@ export function buildLiveTradePlan({
     spread,
     symbolProfile,
     timeframe: analysisTimeframe,
+    }),
+    direction,
+    marketScenario,
+    riskReward,
   });
   const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
   const fvgPlan = analysis.fvgAnalysis;
@@ -327,8 +356,8 @@ export function buildLiveTradePlan({
   const plannedTakeProfits = getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
   const plannedRiskReward = plannedEntry && plannedStopLoss ? calculateRiskReward(plannedEntry, plannedStopLoss, plannedTakeProfits[0]) : riskReward;
   const plannedStopDistance = Math.abs(plannedEntry - plannedStopLoss);
-  const entryQuality = analysisDepth === "quick" ? evaluateQuickEntryQuality({ decision, direction: planDirection }) : evaluateEntryQuality({ analysis, candles, direction: planDirection });
-  const entryAdjustedDecision = analysisDepth === "quick" ? decision : applyEntryQualityGuard(decision, entryQuality);
+  const entryQuality = analysisDepth === "quick" ? evaluateQuickEntryQuality({ decision, direction: planDirection, marketScenario }) : evaluateScenarioEntryQuality({ decision, direction: planDirection, marketScenario });
+  const entryAdjustedDecision = decision;
   const accountRisk = buildAccountRiskSummary(normalizedRiskSettings, plannedStopDistance);
   const riskAdjustedDecision = applyAccountRiskGuard(entryAdjustedDecision, accountRisk);
 
@@ -372,6 +401,7 @@ export function buildLiveTradePlan({
     fvg: analysis.fvgAnalysis,
     orb: analysis.orb,
     trendFilter: analysis.trendFilter,
+    marketScenario,
     accountRisk,
   };
 }
@@ -474,11 +504,205 @@ function applyEntryQualityGuard(decision: DecisionResult, entryQuality: EntryQua
   };
 }
 
+function buildMarketScenario({
+  analysis,
+  candleMap,
+  candles,
+  direction,
+  newsRisk,
+  riskReward,
+  spread,
+  symbolProfile,
+}: MarketScenarioInput): MarketScenario {
+  const last = candles.at(-1);
+  const price = last?.close ?? 0;
+  const atr = Math.max(analysis.atr, price * 0.0001, 0.01);
+  const recent = candles.slice(-50);
+  const recentHigh = recent.length ? Math.max(...recent.map((candle) => candle.high)) : analysis.resistance;
+  const recentLow = recent.length ? Math.min(...recent.map((candle) => candle.low)) : analysis.support;
+  const range = Math.max(recentHigh - recentLow, atr);
+  const zoneWidth = Math.max(atr * 1.15, range * 0.08);
+  const buyZone = {
+    low: round(Math.min(analysis.support, recentLow) - zoneWidth * 0.35),
+    high: round(analysis.support + zoneWidth),
+    label: "ZONE ACHAT",
+  };
+  const sellZone = {
+    low: round(analysis.resistance - zoneWidth),
+    high: round(Math.max(analysis.resistance, recentHigh) + zoneWidth * 0.35),
+    label: "ZONE VENTE",
+  };
+  const waitZone = {
+    low: round(recentLow + range * 0.38),
+    high: round(recentHigh - range * 0.38),
+    label: "ATTENTE",
+  };
+  const spreadHigh = spread !== null && Boolean(symbolProfile.spreadWarning) && spread > (symbolProfile.spreadWarning ?? Number.POSITIVE_INFINITY);
+  const volatilityHigh = analysis.volatility === "trop dangereuse";
+  const unclear = direction === "Neutral" && analysis.structure === "range";
+  const bullishRejection = hasRejectionCandle(candles, "Bullish", atr);
+  const bearishRejection = hasRejectionCandle(candles, "Bearish", atr);
+  const bullishMomentum = evaluateQuickMomentum(candles, analysis, "Bullish").aligned;
+  const bearishMomentum = evaluateQuickMomentum(candles, analysis, "Bearish").aligned;
+  const mtfBullish = evaluateQuickMtfConfirmation(candleMap, "Bullish").confirmedCount;
+  const mtfBearish = evaluateQuickMtfConfirmation(candleMap, "Bearish").confirmedCount;
+  const insideBuyZone = price >= buyZone.low && price <= buyZone.high;
+  const insideSellZone = price >= sellZone.low && price <= sellZone.high;
+  const nearBuyZone = price > buyZone.high && price <= buyZone.high + zoneWidth;
+  const nearSellZone = price < sellZone.low && price >= sellZone.low - zoneWidth;
+  const inMiddleZone = price > buyZone.high + zoneWidth && price < sellZone.low - zoneWidth;
+  const rangePhase = analysis.trend === "range" && range <= atr * 8;
+  const strongTrend = direction !== "Neutral" && analysis.displacement && (direction === "Bullish" ? bullishMomentum : bearishMomentum);
+  const breakoutUp = analysis.breakout && price > analysis.resistance;
+  const breakoutDown = analysis.breakout && price < analysis.support;
+  const retest = analysis.retestConfirmed || Boolean(analysis.fvgAnalysis?.touched) || Math.abs(price - analysis.support) <= atr * 0.55 || Math.abs(price - analysis.resistance) <= atr * 0.55;
+  const highRisk = newsRisk || spreadHigh || volatilityHigh || unclear;
+  const phase: MarketPhase = highRisk
+    ? "high-risk"
+    : retest && (breakoutUp || breakoutDown || analysis.structure === "BOS" || analysis.structure === "CHoCH")
+      ? "retest"
+      : breakoutUp || breakoutDown
+        ? "breakout"
+        : insideBuyZone
+          ? "inside-buy-zone"
+          : insideSellZone
+            ? "inside-sell-zone"
+            : nearBuyZone
+              ? "near-buy-zone"
+              : nearSellZone
+                ? "near-sell-zone"
+                : strongTrend
+                  ? "strong-trend"
+                  : rangePhase
+                    ? "consolidation-range"
+                    : inMiddleZone
+                      ? "middle-zone"
+                      : "middle-zone";
+  const phaseBias = getScenarioBias({ direction, phase, price, recentHigh, recentLow });
+  const directionForScore: Direction = phaseBias === "Buy" ? "Bullish" : phaseBias === "Sell" ? "Bearish" : direction;
+  const rejection = directionForScore === "Bullish" ? bullishRejection : directionForScore === "Bearish" ? bearishRejection : false;
+  const momentum = directionForScore === "Bullish" ? bullishMomentum : directionForScore === "Bearish" ? bearishMomentum : false;
+  const mtfCount = directionForScore === "Bullish" ? mtfBullish : directionForScore === "Bearish" ? mtfBearish : 0;
+  const zoneScore = insideBuyZone || insideSellZone ? 20 : nearBuyZone || nearSellZone ? 10 : inMiddleZone ? -20 : 0;
+  const structureAgrees = directionForScore !== "Neutral" && inferDirection(analysis) === directionForScore;
+  const bosChoChAgrees = (directionForScore === "Bullish" && analysis.structure === "BOS") || (directionForScore === "Bearish" && analysis.structure === "CHoCH");
+  const liquidityConfirm = Boolean(analysis.liquidity.sweepDetected || analysis.liquiditySweep);
+  const fvgConfirm = Boolean(analysis.fvgAnalysis?.touched && analysis.fvgAnalysis.fillState !== "invalid" && analysis.fvgAnalysis.fillState !== "full");
+  const obConfirm = Boolean(analysis.orderBlock?.touched && directionForScore !== "Neutral" && directionMatchesOrderBlock(directionForScore, analysis.orderBlock.direction));
+  const breakoutConfirm = Boolean(analysis.breakout || analysis.structure === "BOS" || analysis.structure === "CHoCH");
+  const rawScore =
+    zoneScore +
+    (analysis.trend === "bullish" && directionForScore === "Bullish" ? 15 : analysis.trend === "bearish" && directionForScore === "Bearish" ? 15 : 0) +
+    (structureAgrees ? 10 : 0) +
+    (bosChoChAgrees ? 15 : 0) +
+    (rejection ? 20 : 0) +
+    (liquidityConfirm ? 15 : 0) +
+    (fvgConfirm ? 10 : 0) +
+    (obConfirm ? 10 : 0) +
+    (breakoutConfirm ? 10 : 0) +
+    (retest ? 15 : 0) +
+    (momentum ? 10 : -10) +
+    (mtfCount >= 3 ? 15 : mtfCount === 2 ? 10 : mtfCount === 0 && directionForScore !== "Neutral" ? -15 : 0) +
+    (riskReward >= 1 ? 15 : -15) -
+    (spreadHigh ? 30 : 0) -
+    (newsRisk ? 35 : 0) -
+    (volatilityHigh ? 25 : 0);
+  const confidence = clamp(rawScore, 100);
+  const validatedConfirmations = [
+    insideBuyZone || insideSellZone ? "Prix dans une zone claire" : null,
+    nearBuyZone || nearSellZone ? "Prix proche d'une zone" : null,
+    rejection ? "Rejet de bougie depuis la zone" : null,
+    momentum ? "Momentum dans le sens du scenario" : null,
+    mtfCount >= 2 ? `${mtfCount} timeframes alignes` : null,
+    liquidityConfirm ? "Liquidite prise ou sweep detecte" : null,
+    fvgConfirm ? "Retest FVG propre" : null,
+    obConfirm ? "Reaction sur Order Block" : null,
+    breakoutConfirm ? "Cassure structurelle detectee" : null,
+    retest ? "Retest en cours ou confirme" : null,
+    riskReward >= 1 ? "Risk/reward acceptable" : null,
+  ].filter(Boolean) as string[];
+  const missingConfirmations = getScenarioMissingConfirmations({ momentum, mtfCount, phase, rejection, retest, riskReward });
+  const detectedRisks = [
+    newsRisk ? "News majeure proche: attendre confirmation" : null,
+    spreadHigh ? "Spread trop eleve" : null,
+    volatilityHigh ? "Volatilite anormale" : null,
+    inMiddleZone ? "Prix en zone milieu sans edge clair" : null,
+    riskReward < 1 ? "Risk/reward sous 1:1" : null,
+    directionForScore !== "Neutral" && mtfCount === 0 ? "Timeframes contradictoires" : null,
+  ].filter(Boolean) as string[];
+  const entryState: MarketScenario["entryState"] =
+    phaseBias !== "Neutral" && rejection && riskReward >= 1 && (insideBuyZone || insideSellZone || retest) && !highRisk
+      ? "confirmed-entry"
+      : phaseBias !== "Neutral" && (nearBuyZone || nearSellZone || insideBuyZone || insideSellZone || phase === "breakout" || phase === "retest")
+        ? "setup-forming"
+        : "zone-detected";
+  const requiredConfirmation = getScenarioRequiredConfirmation({ entryState, phase, primaryBias: phaseBias });
+  const quickScenario = getQuickScenarioText({ entryState, phase, primaryBias: phaseBias });
+  const advancedScenario = getAdvancedScenarioText({ confidence, entryState, phase, primaryBias: phaseBias });
+
+  return {
+    advancedScenario,
+    alternativeScenario: getAlternativeScenarioText(phaseBias),
+    arrow: {
+      direction: phaseBias === "Buy" ? "buy" : phaseBias === "Sell" ? "sell" : "wait",
+      label: entryState === "confirmed-entry" ? "REJET" : phase === "breakout" ? "CASSURE" : phase === "retest" ? "RETEST" : "ATTENTE",
+    },
+    buyZone,
+    confidence,
+    detectedRisks,
+    detailedExplanation: `${advancedScenario} Score ${confidence}/100. ${detectedRisks.length ? `Risques: ${detectedRisks.join(", ")}.` : "Risque principal controle, a confirmer avant execution."}`,
+    entryState,
+    invalidationLevel: phaseBias === "Buy" ? buyZone.low : phaseBias === "Sell" ? sellZone.high : 0,
+    keyLevels: [
+      { price: analysis.support, label: "Support", tone: "buy" as const },
+      { price: analysis.resistance, label: "Resistance", tone: "sell" as const },
+      { price: recentLow, label: "Liquidite basse", tone: "buy" as const },
+      { price: recentHigh, label: "Liquidite haute", tone: "sell" as const },
+    ].filter((level) => Number.isFinite(level.price) && level.price > 0),
+    missingConfirmations,
+    phase,
+    pricePosition: getPricePositionText(phase),
+    primaryBias: phaseBias,
+    quickScenario,
+    requiredConfirmation,
+    sellZone,
+    shortExplanation: `${quickScenario} Zone detectee ne veut pas dire entree immediate; ${requiredConfirmation}.`,
+    validatedConfirmations,
+    waitZone,
+  };
+}
+
+function createEmptyMarketScenario(): MarketScenario {
+  return {
+    advancedScenario: "Scenario indisponible tant que les bougies live ne sont pas exploitables.",
+    alternativeScenario: "Attendre un flux stable avant de comparer les scenarios.",
+    arrow: { direction: "wait", label: "ATTENTE" },
+    buyZone: { low: 0, high: 0, label: "ZONE ACHAT" },
+    confidence: 0,
+    detectedRisks: ["Aucune donnee OHLC exploitable"],
+    detailedExplanation: "Analyse graphique indisponible sans bougies live.",
+    entryState: "zone-detected",
+    invalidationLevel: 0,
+    keyLevels: [],
+    missingConfirmations: ["Bougies live"],
+    phase: "high-risk",
+    pricePosition: "Donnees indisponibles",
+    primaryBias: "Neutral",
+    quickScenario: "WAIT: aucune zone exploitable.",
+    requiredConfirmation: "Recevoir des bougies live exploitables",
+    sellZone: { low: 0, high: 0, label: "ZONE VENTE" },
+    shortExplanation: "Aucun signal tant que le marche n'est pas lisible.",
+    validatedConfirmations: [],
+    waitZone: { low: 0, high: 0, label: "ATTENTE" },
+  };
+}
+
 function evaluateQuickSignal({
   analysis,
   candleMap,
   candles,
   direction,
+  marketScenario,
   redNewsNearby,
   riskReward,
   spread,
@@ -488,6 +712,7 @@ function evaluateQuickSignal({
   candleMap: Record<Timeframe, Candle[]>;
   candles: Candle[];
   direction: Direction;
+  marketScenario: MarketScenario;
   redNewsNearby: boolean;
   riskReward: number;
   spread: number | null;
@@ -518,23 +743,25 @@ function evaluateQuickSignal({
       (analysis.fakeout ? 12 : 0),
     100,
   );
+  const scenarioConfirmations = marketScenario.validatedConfirmations.length;
   const missingConditions = [
     redNewsNearby ? "No red USD news risk" : null,
+    marketScenario.phase === "middle-zone" ? "Prix en zone milieu: attendre une zone achat/vente" : null,
+    marketScenario.phase === "high-risk" ? "Phase risque eleve" : null,
     direction === "Neutral" ? "Clear current trend direction" : null,
-    mtf.confirmedCount >= 2 ? null : "M1/M5/M15 confirmation",
-    momentum.aligned ? null : "Short-term momentum",
+    scenarioConfirmations >= 2 ? null : "Au moins 2 confirmations rapides",
     volatilityOk ? null : "Volatility below danger zone",
     spreadOk ? null : "Spread safe",
     blockedByLevel ? (direction === "Bullish" ? "Do not buy near resistance after extended rise" : "Do not sell near support after extended drop") : null,
     confidence >= 58 ? null : "Quick confidence >= 58",
   ].filter(Boolean) as string[];
 
-  if (redNewsNearby) {
-    return { confidence, missingConditions, signal: "WAIT", waitReason: "WAIT: red news risk" };
+  if (redNewsNearby || marketScenario.phase === "high-risk") {
+    return { confidence: Math.min(marketScenario.confidence, confidence), missingConditions, signal: "WAIT", waitReason: "WAIT: phase risque eleve" };
   }
 
-  if (!volatilityOk) {
-    return { confidence, missingConditions, signal: "WAIT", waitReason: "WAIT: volatility too dangerous for quick analysis" };
+  if (!volatilityOk || marketScenario.phase === "middle-zone" || marketScenario.phase === "consolidation-range" && marketScenario.entryState !== "confirmed-entry") {
+    return { confidence: Math.min(marketScenario.confidence, confidence), missingConditions, signal: "WAIT", waitReason: `WAIT: ${marketScenario.quickScenario}` };
   }
 
   if (blockedByLevel) {
@@ -546,24 +773,286 @@ function evaluateQuickSignal({
     };
   }
 
-  if (direction === "Neutral" || confidence < 58 || mtf.confirmedCount < 2 || !momentum.aligned || !spreadOk) {
+  if (direction === "Neutral" || confidence < 58 || scenarioConfirmations < 2 || marketScenario.entryState !== "confirmed-entry" || !spreadOk) {
     return {
-      confidence,
+      confidence: Math.min(marketScenario.confidence, confidence),
       missingConditions,
       signal: "WAIT",
-      waitReason: getQuickWaitReason(missingConditions),
+      waitReason: `WAIT: ${marketScenario.requiredConfirmation}`,
     };
   }
 
   return {
-    confidence,
+    confidence: Math.max(confidence, marketScenario.confidence),
     missingConditions: [],
-    signal: direction === "Bullish" ? "BUY" : "SELL",
-    waitReason: `${direction === "Bullish" ? "BUY" : "SELL"}: Analyse rapide confirms trend, MTF, momentum, volatility and spread`,
+    signal: marketScenario.primaryBias === "Buy" ? "BUY" : marketScenario.primaryBias === "Sell" ? "SELL" : "WAIT",
+    waitReason: `${marketScenario.primaryBias === "Buy" ? "BUY" : "SELL"}: scenario probable confirme par zone, rejet et risque acceptable`,
   };
 }
 
-function evaluateQuickEntryQuality({ decision, direction }: { decision: DecisionResult; direction: Direction }): EntryQualityResult {
+function hasRejectionCandle(candles: Candle[], direction: Direction, atr: number) {
+  const last = candles.at(-1);
+
+  if (!last || direction === "Neutral") {
+    return false;
+  }
+
+  const body = Math.max(Math.abs(last.close - last.open), atr * 0.05, 0.01);
+  const lowerWick = Math.min(last.open, last.close) - last.low;
+  const upperWick = last.high - Math.max(last.open, last.close);
+
+  if (direction === "Bullish") {
+    return lowerWick >= body * 1.1 && last.close >= last.open;
+  }
+
+  return upperWick >= body * 1.1 && last.close <= last.open;
+}
+
+function getScenarioBias({
+  direction,
+  phase,
+  price,
+  recentHigh,
+  recentLow,
+}: {
+  direction: Direction;
+  phase: MarketPhase;
+  price: number;
+  recentHigh: number;
+  recentLow: number;
+}): MarketScenario["primaryBias"] {
+  if (phase === "near-buy-zone" || phase === "inside-buy-zone") {
+    return "Buy";
+  }
+
+  if (phase === "near-sell-zone" || phase === "inside-sell-zone") {
+    return "Sell";
+  }
+
+  if (phase === "breakout" || phase === "retest" || phase === "strong-trend") {
+    return direction === "Bullish" ? "Buy" : direction === "Bearish" ? "Sell" : "Neutral";
+  }
+
+  if (phase === "consolidation-range") {
+    const range = Math.max(recentHigh - recentLow, 0.01);
+    const location = (price - recentLow) / range;
+
+    if (location <= 0.25) {
+      return "Buy";
+    }
+
+    if (location >= 0.75) {
+      return "Sell";
+    }
+  }
+
+  return "Neutral";
+}
+
+function getScenarioMissingConfirmations({
+  momentum,
+  mtfCount,
+  phase,
+  rejection,
+  retest,
+  riskReward,
+}: {
+  momentum: boolean;
+  mtfCount: number;
+  phase: MarketPhase;
+  rejection: boolean;
+  retest: boolean;
+  riskReward: number;
+}) {
+  const missing = [
+    phase === "middle-zone" ? "Attendre une zone achat/vente claire" : null,
+    phase === "breakout" && !retest ? "Attendre le retest de la cassure" : null,
+    phase === "near-buy-zone" || phase === "near-sell-zone" || phase === "inside-buy-zone" || phase === "inside-sell-zone" ? (rejection ? null : "Attendre un rejet de bougie") : null,
+    momentum ? null : "Momentum a confirmer",
+    mtfCount >= 2 ? null : "Au moins 2 timeframes M1/M5/M15 alignes",
+    riskReward >= 1 ? null : "Risk/reward minimum 1:1",
+  ].filter(Boolean) as string[];
+
+  return missing.length ? missing : ["Attendre confirmation finale avant entree"];
+}
+
+function getScenarioRequiredConfirmation({
+  entryState,
+  phase,
+  primaryBias,
+}: {
+  entryState: MarketScenario["entryState"];
+  phase: MarketPhase;
+  primaryBias: MarketScenario["primaryBias"];
+}) {
+  if (entryState === "confirmed-entry") {
+    return "Verifier spread, taille de lot, stop loss et execution manuelle";
+  }
+
+  if (phase === "middle-zone") {
+    return "Attendre que le prix rejoigne une zone achat ou vente";
+  }
+
+  if (phase === "breakout") {
+    return "Attendre un retest propre de la cassure avant toute entree";
+  }
+
+  if (phase === "retest") {
+    return "Attendre rejet ou micro-structure dans le sens du retest";
+  }
+
+  if (phase === "near-buy-zone" || phase === "inside-buy-zone") {
+    return "Attendre rejet haussier depuis la zone achat";
+  }
+
+  if (phase === "near-sell-zone" || phase === "inside-sell-zone") {
+    return "Attendre rejet baissier depuis la zone vente";
+  }
+
+  if (phase === "consolidation-range") {
+    return primaryBias === "Neutral" ? "Attendre les extremites du range" : "Attendre rejet sur extremite du range";
+  }
+
+  if (phase === "strong-trend") {
+    return "Attendre pullback confirme, eviter entree trop tardive";
+  }
+
+  return "Attendre confirmation et risque plus clair";
+}
+
+function getQuickScenarioText({
+  entryState,
+  phase,
+  primaryBias,
+}: {
+  entryState: MarketScenario["entryState"];
+  phase: MarketPhase;
+  primaryBias: MarketScenario["primaryBias"];
+}) {
+  if (phase === "high-risk") {
+    return "WAIT: phase risque eleve, scenario a confirmer.";
+  }
+
+  if (phase === "middle-zone") {
+    return "WAIT: prix en zone milieu, pas d'edge clair.";
+  }
+
+  if (entryState === "confirmed-entry" && primaryBias !== "Neutral") {
+    return `Scenario probable ${primaryBias}: zone + rejet + risque acceptable.`;
+  }
+
+  if (primaryBias !== "Neutral") {
+    return `Possibilite ${primaryBias}: setup en formation, attendre confirmation.`;
+  }
+
+  return "Scenario probable: attente, marche encore peu clair.";
+}
+
+function getAdvancedScenarioText({
+  confidence,
+  entryState,
+  phase,
+  primaryBias,
+}: {
+  confidence: number;
+  entryState: MarketScenario["entryState"];
+  phase: MarketPhase;
+  primaryBias: MarketScenario["primaryBias"];
+}) {
+  if (phase === "high-risk") {
+    return "Scenario avance: WAIT, risque eleve detecte.";
+  }
+
+  if (phase === "middle-zone") {
+    return "Scenario avance: WAIT, prix entre zone achat et zone vente.";
+  }
+
+  if (confidence >= 75 && entryState === "confirmed-entry" && primaryBias !== "Neutral") {
+    return `Scenario avance probable ${primaryBias}: confirmations suffisantes, toujours a confirmer a l'execution.`;
+  }
+
+  if (confidence >= 55 && primaryBias !== "Neutral") {
+    return `Scenario avance ${primaryBias} en formation: attendre confirmation manquante.`;
+  }
+
+  return "Scenario avance: WAIT, confirmations insuffisantes.";
+}
+
+function getAlternativeScenarioText(primaryBias: MarketScenario["primaryBias"]) {
+  if (primaryBias === "Buy") {
+    return "Scenario alternatif: rejet de la zone achat invalide, retour vers zone d'attente ou cassure baissiere.";
+  }
+
+  if (primaryBias === "Sell") {
+    return "Scenario alternatif: rejet de la zone vente invalide, retour vers zone d'attente ou cassure haussiere.";
+  }
+
+  return "Scenario alternatif: attendre cassure + retest ou retour sur une zone claire.";
+}
+
+function getPricePositionText(phase: MarketPhase) {
+  const labels: Record<MarketPhase, string> = {
+    "breakout": "Cassure en cours",
+    "consolidation-range": "Range / consolidation",
+    "high-risk": "Phase risque eleve",
+    "inside-buy-zone": "Dans la zone achat",
+    "inside-sell-zone": "Dans la zone vente",
+    "middle-zone": "Zone milieu",
+    "near-buy-zone": "Proche zone achat",
+    "near-sell-zone": "Proche zone vente",
+    "retest": "Retest de niveau",
+    "strong-trend": "Tendance forte",
+  };
+
+  return labels[phase];
+}
+
+function evaluateDepthSignal({ baseDecision, direction, marketScenario, riskReward }: { baseDecision: DecisionResult; direction: Direction; marketScenario: MarketScenario; riskReward: number }): DecisionResult {
+  if (marketScenario.phase === "high-risk") {
+    return {
+      confidence: Math.min(marketScenario.confidence, 44),
+      missingConditions: marketScenario.detectedRisks,
+      signal: "WAIT",
+      waitReason: `WAIT: ${marketScenario.detectedRisks[0] ?? "phase risque eleve"}`,
+    };
+  }
+
+  if (marketScenario.phase === "middle-zone" || riskReward < 1) {
+    return {
+      confidence: Math.min(marketScenario.confidence, 54),
+      missingConditions: marketScenario.missingConfirmations,
+      signal: "WAIT",
+      waitReason: marketScenario.phase === "middle-zone" ? "WAIT: prix en zone milieu sans edge clair" : "WAIT: risk/reward insuffisant",
+    };
+  }
+
+  if (marketScenario.confidence >= 75 && marketScenario.entryState === "confirmed-entry" && marketScenario.primaryBias !== "Neutral") {
+    return {
+      confidence: marketScenario.confidence,
+      missingConditions: [],
+      signal: marketScenario.primaryBias === "Buy" ? "BUY" : "SELL",
+      waitReason: `${marketScenario.primaryBias}: scenario avance confirme par score phase ${marketScenario.confidence}/100`,
+    };
+  }
+
+  if (marketScenario.confidence >= 55) {
+    return {
+      confidence: marketScenario.confidence,
+      missingConditions: marketScenario.missingConfirmations,
+      signal: "WAIT",
+      waitReason: `WAIT: setup en formation, ${marketScenario.requiredConfirmation}`,
+    };
+  }
+
+  return {
+    confidence: Math.min(baseDecision.confidence, marketScenario.confidence),
+    missingConditions: marketScenario.missingConfirmations.length ? marketScenario.missingConfirmations : baseDecision.missingConditions,
+    signal: "WAIT",
+    waitReason: `WAIT: no valid trade, ${marketScenario.requiredConfirmation}`,
+  };
+}
+
+function evaluateQuickEntryQuality({ decision, direction, marketScenario }: { decision: DecisionResult; direction: Direction; marketScenario: MarketScenario }): EntryQualityResult {
   const bias = direction === "Bullish" ? "Buy" : direction === "Bearish" ? "Sell" : "Neutral";
   const confirmed = decision.signal === "BUY" || decision.signal === "SELL";
 
@@ -572,10 +1061,24 @@ function evaluateQuickEntryQuality({ decision, direction }: { decision: Decision
     blocked: !confirmed,
     confirmation: confirmed ? "Confirmed" : "Not confirmed",
     reason: confirmed
-      ? `${bias} quick entry confirmed by essential factors.`
-      : `${bias} bias, but quick entry is not confirmed yet.`,
+      ? `${bias} quick entry confirmed: ${marketScenario.shortExplanation}`
+      : `${bias} bias, but quick entry is not confirmed yet. ${marketScenario.shortExplanation}`,
     riskLevel: decision.confidence >= 70 ? "Medium" : "High",
-    waitFor: confirmed ? "Check execution price, spread and lot size before manual entry." : decision.missingConditions[0] ?? "Wait for trend, MTF and momentum to align.",
+    waitFor: confirmed ? "Check execution price, spread and lot size before manual entry." : marketScenario.requiredConfirmation,
+  };
+}
+
+function evaluateScenarioEntryQuality({ decision, direction, marketScenario }: { decision: DecisionResult; direction: Direction; marketScenario: MarketScenario }): EntryQualityResult {
+  const bias = direction === "Bullish" ? "Buy" : direction === "Bearish" ? "Sell" : "Neutral";
+  const confirmed = decision.signal === "BUY" || decision.signal === "SELL" || decision.signal === "BUY SCALP READY" || decision.signal === "SELL SCALP READY" || decision.signal === "STRONG BUY" || decision.signal === "STRONG SELL";
+
+  return {
+    bias,
+    blocked: !confirmed,
+    confirmation: confirmed ? "Confirmed" : "Not confirmed",
+    reason: confirmed ? marketScenario.detailedExplanation : `${bias} bias, but entry blocked. ${marketScenario.detailedExplanation}`,
+    riskLevel: marketScenario.detectedRisks.length || marketScenario.confidence < 55 ? "High" : marketScenario.confidence >= 75 ? "Low" : "Medium",
+    waitFor: confirmed ? "Final manual execution check: spread, lot size, SL and news." : marketScenario.requiredConfirmation,
   };
 }
 
@@ -1611,6 +2114,7 @@ function emptyTimeframeAnalysis({
     fvg: null,
     orb: null,
     trendFilter: null,
+    marketScenario: createEmptyMarketScenario(),
     riskReward: 0,
     summary: waitReason,
   };

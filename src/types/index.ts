@@ -38,6 +38,20 @@ export type FvgFillState = "fresh" | "partial" | "full" | "invalid";
 
 export type Direction = "Bullish" | "Bearish" | "Neutral";
 
+export type MarketPhase =
+  | "middle-zone"
+  | "near-buy-zone"
+  | "near-sell-zone"
+  | "inside-buy-zone"
+  | "inside-sell-zone"
+  | "breakout"
+  | "retest"
+  | "consolidation-range"
+  | "strong-trend"
+  | "high-risk";
+
+export type EntryState = "zone-detected" | "setup-forming" | "confirmed-entry";
+
 export type Trend = "bullish" | "bearish" | "range";
 
 export type StructureState = "bullish" | "bearish" | "range" | "BOS" | "CHoCH";
@@ -309,6 +323,7 @@ export interface TimeframeAnalysis {
   fvg: FvgAnalysis | null;
   orb: OrbAnalysis | null;
   trendFilter: TrendFilterAnalysis | null;
+  marketScenario: MarketScenario;
   riskReward: number;
   summary: string;
 }
@@ -354,7 +369,48 @@ export interface TradePlan {
   fvg: FvgAnalysis | null;
   orb: OrbAnalysis | null;
   trendFilter: TrendFilterAnalysis | null;
+  marketScenario: MarketScenario;
   accountRisk: AccountRiskSummary;
+}
+
+export interface MarketScenarioZone {
+  low: number;
+  high: number;
+  label: string;
+}
+
+export interface MarketScenarioLevel {
+  price: number;
+  label: string;
+  tone: "buy" | "sell" | "wait" | "neutral";
+}
+
+export interface MarketScenarioArrow {
+  direction: "buy" | "sell" | "wait";
+  label: string;
+}
+
+export interface MarketScenario {
+  phase: MarketPhase;
+  entryState: EntryState;
+  primaryBias: "Buy" | "Sell" | "Neutral";
+  pricePosition: string;
+  quickScenario: string;
+  advancedScenario: string;
+  alternativeScenario: string;
+  requiredConfirmation: string;
+  validatedConfirmations: string[];
+  missingConfirmations: string[];
+  detectedRisks: string[];
+  shortExplanation: string;
+  detailedExplanation: string;
+  confidence: number;
+  buyZone: MarketScenarioZone;
+  sellZone: MarketScenarioZone;
+  waitZone: MarketScenarioZone;
+  keyLevels: MarketScenarioLevel[];
+  arrow: MarketScenarioArrow;
+  invalidationLevel: number;
 }
 
 export interface RiskInput {

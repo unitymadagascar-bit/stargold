@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 
 const port = Number(process.env.STAR_GOLD_LOCAL_RELAY_PORT ?? 3000);
-const cloudIngestUrl = process.env.STAR_GOLD_CLOUD_INGEST_URL ?? "https://tradetsr.vercel.app/api/market/mt5/ingest";
+const cloudIngestUrl = process.env.STAR_GOLD_CLOUD_INGEST_URL ?? "https://stargold-chi.vercel.app/api/market/mt5/ingest";
 const bridgeToken = process.env.MT5_BRIDGE_TOKEN ?? "";
 const maxBodyBytes = 8 * 1024 * 1024;
 

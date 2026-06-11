@@ -145,7 +145,7 @@ export function MainDashboard() {
       permission === "granted"
         ? "Browser notifications enabled."
         : permission === "denied"
-          ? "Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app."
+          ? "Notifications are blocked. Enable them in your browser site settings for stargold-chi.vercel.app."
           : "Notification permission was not granted yet.",
     );
   }
@@ -874,7 +874,7 @@ function TradingAlertsPanel({
       <p className="mt-3 rounded border border-sky-300/15 bg-sky-300/10 px-3 py-2 text-xs leading-5 text-sky-100">{notificationStatus}</p>
       {notificationStatus.includes("blocked") || notificationStatus.includes("Blocked") ? (
         <p className="mt-2 rounded border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
-          Browser blocked notifications. Open site settings for tradetsr.vercel.app and allow Notifications, then click Request permission again.
+          Browser blocked notifications. Open site settings for stargold-chi.vercel.app and allow Notifications, then click Request permission again.
         </p>
       ) : null}
 
@@ -1085,7 +1085,7 @@ function showBrowserNotification(candidate: TradingAlertCandidate, setNotificati
   }
 
   if (Notification.permission === "denied") {
-    setNotificationStatus("Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app.");
+    setNotificationStatus("Notifications are blocked. Enable them in your browser site settings for stargold-chi.vercel.app.");
     return;
   }
 
@@ -1151,7 +1151,7 @@ function getNotificationStatus() {
   }
 
   if (Notification.permission === "denied") {
-    return "Notifications are blocked. Enable them in your browser site settings for tradetsr.vercel.app.";
+    return "Notifications are blocked. Enable them in your browser site settings for stargold-chi.vercel.app.";
   }
 
   return "Click Request permission to enable browser notifications.";

@@ -17,7 +17,7 @@ MT5 TradeTSRBridge -> local Windows relay or Vercel ingest API -> Supabase relay
 7. Ajoute cette URL :
 
 ```text
-https://tradetsr.vercel.app
+https://stargold-chi.vercel.app
 ```
 
 8. Attache `TradeTSRBridge` au graphique `XAUUSD`.
@@ -25,7 +25,7 @@ https://tradetsr.vercel.app
 10. Ouvre l'application :
 
 ```text
-https://tradetsr.vercel.app
+https://stargold-chi.vercel.app
 ```
 
 ## Mode local optionnel
@@ -68,11 +68,11 @@ Le statut passe a `MT5 non connecte` si aucun tick MT5 n'arrive pendant plus de 
 
 Si l'application affiche encore `MT5 non connecte`, verifie :
 
-- l'URL WebRequest `https://tradetsr.vercel.app` autorisee dans MT5 ;
+- l'URL WebRequest `https://stargold-chi.vercel.app` autorisee dans MT5 ;
 - le bouton `Algo Trading` ;
 - l'onglet `Experts` dans MT5 pour les erreurs WebRequest ;
-- que l'Expert Advisor utilise bien l'endpoint `https://tradetsr.vercel.app/api/market/mt5/ingest` ;
-- la page diagnostic `https://tradetsr.vercel.app/settings/mt5-connection` pour verifier le symbole broker, le dernier tick et la source active.
+- que l'Expert Advisor utilise bien l'endpoint `https://stargold-chi.vercel.app/api/market/mt5/ingest` ;
+- la page diagnostic `https://stargold-chi.vercel.app/settings/mt5-connection` pour verifier le symbole broker, le dernier tick et la source active.
 
 ## Demarrage Windows
 

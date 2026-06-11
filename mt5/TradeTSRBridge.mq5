@@ -4,14 +4,14 @@
 // Before running it, add these URLs to:
 // Tools > Options > Expert Advisors > Allow WebRequest for listed URL.
 //
-// https://tradetsr.vercel.app
+// https://stargold-chi.vercel.app
 
 #property strict
 #property version "1.12"
 
-input string InpEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
+input string InpEndpoint = "https://stargold-chi.vercel.app/api/market/mt5/ingest";
 input bool InpUseCloudFallback = true;
-input string InpCloudFallbackEndpoint = "https://tradetsr.vercel.app/api/market/mt5/ingest";
+input string InpCloudFallbackEndpoint = "https://stargold-chi.vercel.app/api/market/mt5/ingest";
 input string InpBridgeToken = "";
 input int InpBarsPerTimeframe = 700;
 input int InpPushIntervalSeconds = 1;

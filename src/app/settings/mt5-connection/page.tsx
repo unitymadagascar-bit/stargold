@@ -36,6 +36,8 @@ interface Mt5DiagnosticsPayload {
 }
 
 const defaultSymbol = "XAUUSD";
+const defaultPublicAppUrl = "https://stargold-chi.vercel.app";
+const defaultSetupUrl = `${defaultPublicAppUrl}/api/market/mt5/ingest`;
 
 export default function Mt5ConnectionSettingsPage() {
   const [symbol, setSymbol] = useState(defaultSymbol);
@@ -72,7 +74,7 @@ export default function Mt5ConnectionSettingsPage() {
           },
         ],
         error: "Diagnostic impossible.",
-        setupUrl: "https://tradetsr.vercel.app/api/market/mt5/ingest",
+        setupUrl: defaultSetupUrl,
       });
     } finally {
       setLoading(false);
@@ -171,7 +173,7 @@ export default function Mt5ConnectionSettingsPage() {
           <ol className="mt-4 space-y-2 text-sm leading-6 text-slate-300">
             <li><strong className="text-white">1.</strong> Installe MT5, connecte le compte Exness, puis ouvre le symbole exact a trader.</li>
             <li><strong className="text-white">2.</strong> Copie <code>mt5/TradeTSRBridge.mq5</code> dans <code>MQL5/Experts/</code>, compile dans MetaEditor, puis rafraichis les Expert Advisors.</li>
-            <li><strong className="text-white">3.</strong> Dans MT5: <code>Tools &gt; Options &gt; Expert Advisors</code>, active Algo Trading et autorise <code>https://tradetsr.vercel.app</code> dans WebRequest.</li>
+            <li><strong className="text-white">3.</strong> Dans MT5: <code>Tools &gt; Options &gt; Expert Advisors</code>, active Algo Trading et autorise <code>{defaultPublicAppUrl}</code> dans WebRequest.</li>
             <li><strong className="text-white">4.</strong> Attache <code>TradeTSRBridge</code> au graphique du symbole. Laisse <code>InpEndpoint</code> sur l'URL API ci-dessous.</li>
             <li><strong className="text-white">5.</strong> Verifie l'onglet <code>Experts</code>: tu dois voir le ping OK ou une erreur WebRequest claire.</li>
             <li><strong className="text-white">6.</strong> Reviens ici et clique <code>Tester la connexion</code>. Si le tick date de moins de 10 secondes, la synchronisation est OK.</li>
@@ -180,7 +182,7 @@ export default function Mt5ConnectionSettingsPage() {
 
         <div className="rounded-md border border-amber-300/20 bg-amber-300/10 p-4">
           <h2 className="text-sm font-black uppercase tracking-[0.16em] text-amber-100">URL API a configurer</h2>
-          <p className="mt-3 break-all rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-white">{data?.setupUrl ?? "https://tradetsr.vercel.app/api/market/mt5/ingest"}</p>
+          <p className="mt-3 break-all rounded-md border border-white/10 bg-black/30 p-3 font-mono text-xs leading-5 text-white">{data?.setupUrl ?? defaultSetupUrl}</p>
           <button className="mt-3 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md border border-amber-300/30 bg-black/25 px-3 text-sm font-bold text-amber-100 transition hover:bg-black/35" type="button" onClick={copySetupUrl}>
             <Copy size={15} />
             {copied ? "URL copiee" : "Copier l'URL"}

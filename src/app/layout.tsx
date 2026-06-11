@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://tradetsr.vercel.app"),
+  metadataBase: new URL("https://stargold-chi.vercel.app"),
   title: "Star Gold By TSR",
   description: "Gold trading assistant for MT5, XAUUSD analysis, scalping decisions and risk control.",
   applicationName: "Star Gold By TSR",

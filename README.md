@@ -9,7 +9,7 @@ The production app must not read `localhost` from Vercel. The live flow is:
 ```text
 MT5 TradeTSRBridge on your PC
   -> local Windows relay on 127.0.0.1:3000, or direct Vercel WebRequest if allowed
-  -> https://tradetsr.vercel.app/api/market/mt5/ingest
+  -> https://stargold-chi.vercel.app/api/market/mt5/ingest
   -> Supabase cloud relay tables
   -> Vercel XAUUSD APIs and live stream
   -> browser dashboard
@@ -70,14 +70,14 @@ npm exec --yes --package pg -- node scripts/setup-supabase-relay.mjs
 6. Add:
 
 ```text
-https://tradetsr.vercel.app
+https://stargold-chi.vercel.app
 ```
 
 7. Attach `TradeTSRBridge` to the XAUUSD chart.
 8. Keep `InpEndpoint` as:
 
 ```text
-https://tradetsr.vercel.app/api/market/mt5/ingest
+https://stargold-chi.vercel.app/api/market/mt5/ingest
 ```
 
 9. Enable `Algo Trading`.
@@ -105,7 +105,7 @@ If the source is not MT5, the app labels it `Fallback, not live MT5`. Fallback d
 Open:
 
 ```text
-https://tradetsr.vercel.app/settings/mt5-connection
+https://stargold-chi.vercel.app/settings/mt5-connection
 ```
 
 Use this page when moving to a new PC or broker terminal. It shows:
@@ -118,10 +118,10 @@ Use this page when moving to a new PC or broker terminal. It shows:
 - one-click connection test
 - diagnostics for MT5 not launched, EA inactive, wrong symbol, no tick received, API inaccessible and price not synchronized with the chart
 
-For a new PC, install MT5, log in to Exness, attach `TradeTSRBridge` to the broker symbol, enable Algo Trading, allow `https://tradetsr.vercel.app` in MT5 WebRequest settings, and keep the EA endpoint as:
+For a new PC, install MT5, log in to Exness, attach `TradeTSRBridge` to the broker symbol, enable Algo Trading, allow `https://stargold-chi.vercel.app` in MT5 WebRequest settings, and keep the EA endpoint as:
 
 ```text
-https://tradetsr.vercel.app/api/market/mt5/ingest
+https://stargold-chi.vercel.app/api/market/mt5/ingest
 ```
 
 ## Windows startup

@@ -181,6 +181,16 @@ export function GoldChart({
       : `Aucun tick MT5 exploitable pour ${symbolProfile.symbol} apres quelques secondes.`;
 
   useEffect(() => {
+    function handleStrategyDisplay(event: Event) {
+      const detail = (event as CustomEvent<StrategyDisplayCommand>).detail;
+      setDisplaySettings((current) => applyStrategyDisplayCommand(current, detail));
+    }
+
+    window.addEventListener("tradetsr-strategy-display", handleStrategyDisplay);
+    return () => window.removeEventListener("tradetsr-strategy-display", handleStrategyDisplay);
+  }, []);
+
+  useEffect(() => {
     setFallbackDelayElapsed(false);
 
     if (candles.length || symbolProfile.category !== "Crypto") {
@@ -1384,6 +1394,7 @@ function buildScenarioOverlay({ plan, series, settings }: { plan: TradePlan; ser
   const quickTone = quick?.h1Direction === "Bullish" ? "buy" : quick?.h1Direction === "Bearish" ? "sell" : "wait";
   const zones = [
     quick && settings.showEntryZone ? buildScenarioZone(quick.entryZone.low, quick.entryZone.high, "ENTRY ZONE", quickTone, series) : null,
+    quick && settings.showOrderBlocksH1 ? buildScenarioZone(quick.orderBlockZone.low, quick.orderBlockZone.high, "ORDER BLOCK H1", quickTone, series) : null,
     !quick || settings.showMarketStructure ? buildScenarioZone(scenario.buyZone.low, scenario.buyZone.high, "ZONE ACHAT", "buy", series) : null,
     !quick || settings.showMarketStructure ? buildScenarioZone(scenario.sellZone.low, scenario.sellZone.high, "ZONE VENTE", "sell", series) : null,
     !quick || settings.showMarketStructure ? buildScenarioZone(scenario.waitZone.low, scenario.waitZone.high, "ATTENTE", "wait", series) : null,
@@ -1826,7 +1837,83 @@ interface ChartDisplaySettings {
   showEmptyHelper: boolean;
 }
 
+type StrategyDisplayCommand =
+  | { action: "all" | "essentials" | "hide" | "reset" }
+  | { action: "toggle"; key: keyof ChartDisplaySettings; value: boolean };
+
 type ChartSizePreset = keyof typeof CHART_HEIGHTS;
+
+const strategyDisplayKeys: Array<keyof ChartDisplaySettings> = [
+  "showOrderBlocks",
+  "showOrderBlocksH1",
+  "showOrderBlocksM15",
+  "showMarketStructure",
+  "showHhHl",
+  "showBos",
+  "showChoch",
+  "showTrendline",
+  "showFibonacci",
+  "showRsi",
+  "showCrtLevels",
+  "showLiquidityLevels",
+  "showRejectionZones",
+  "showEntryZone",
+  "showStopLoss",
+  "showTakeProfit",
+  "showRiskRewardBox",
+  "showBuySellSignal",
+  "showQuickAnalysisSummary",
+  "showTradeLevels",
+  "showScenarioAnalysis",
+];
+
+function applyStrategyDisplayCommand(current: ChartDisplaySettings, command?: StrategyDisplayCommand): ChartDisplaySettings {
+  if (!command) {
+    return current;
+  }
+
+  if (command.action === "reset") {
+    return defaultDisplaySettings;
+  }
+
+  if (command.action === "toggle") {
+    return { ...current, [command.key]: command.value };
+  }
+
+  if (command.action === "hide") {
+    return strategyDisplayKeys.reduce((settings, key) => ({ ...settings, [key]: false }), current);
+  }
+
+  if (command.action === "all") {
+    return strategyDisplayKeys.reduce((settings, key) => ({ ...settings, [key]: true }), { ...current, showTradeLevels: true, showScenarioAnalysis: true });
+  }
+
+  return {
+    ...current,
+    showBos: false,
+    showBuySellSignal: true,
+    showChoch: false,
+    showCrtLevels: false,
+    showEntryZone: true,
+    showFibonacci: false,
+    showFvg: false,
+    showHhHl: false,
+    showLiquidityLevels: false,
+    showMarketStructure: false,
+    showOrderBlocks: true,
+    showOrderBlocksH1: true,
+    showOrderBlocksM15: false,
+    showQuickAnalysisSummary: true,
+    showRejectionZones: false,
+    showRiskRewardBox: true,
+    showRsi: false,
+    showScenarioAnalysis: true,
+    showStopLoss: true,
+    showTakeProfit: true,
+    showTradeLevels: true,
+    showTrendline: false,
+  };
+}
 
 function loadSavedChartHeight() {
   if (typeof window === "undefined") {

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
 import type { AnalysisDepth, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, QuickEntryMode, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
@@ -157,7 +158,7 @@ export function MainDashboard() {
 
   return (
     <main className="mx-auto min-h-screen w-full max-w-[1780px] px-3 py-3 sm:px-4 lg:px-5">
-      <BrandHeader />
+      <BrandHeader selectedSymbol={symbolProfile.symbol} />
       <SymbolSelector profile={symbolProfile} selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
       <Mt5ConnectionHeader live={live} spread={spread} />
 
@@ -456,7 +457,7 @@ function formatSignalTiming(timing: TradePlan["marketScenario"]["signalTiming"])
   return "Aucun";
 }
 
-function BrandHeader() {
+function BrandHeader({ selectedSymbol }: { selectedSymbol: string }) {
   return (
     <header className="mb-3 rounded-md border border-amber-300/20 bg-[#11100c] px-4 py-3 shadow-[0_18px_48px_rgba(0,0,0,0.24)]">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -469,6 +470,12 @@ function BrandHeader() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Link
+            className="rounded-md border border-amber-300/35 bg-amber-300/15 px-3 py-2 font-bold text-amber-100 transition hover:bg-amber-300/25"
+            href={`/strategy-chart?symbol=${encodeURIComponent(selectedSymbol)}`}
+          >
+            Ouvrir le graphique strategie
+          </Link>
           <span className="rounded-md border border-amber-300/25 bg-amber-300/10 px-3 py-2 font-mono font-bold text-amber-100">MULTI-SYMBOL</span>
           <span className="rounded-md border border-white/10 bg-black/25 px-3 py-2 font-semibold text-slate-300">MT5 Bridge Ready</span>
           <a className="rounded-md border border-sky-300/20 bg-sky-300/10 px-3 py-2 font-semibold text-sky-100 transition hover:bg-sky-300/15" href="/settings/mt5-connection">

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
-import type { AnalysisDepth, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { AnalysisDepth, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, QuickEntryMode, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -42,6 +42,7 @@ export function MainDashboard() {
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M15");
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
   const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>("deep");
+  const [quickEntryMode, setQuickEntryMode] = useState<QuickEntryMode>("mixed");
   const [scalpingSensitivity, setScalpingSensitivity] = useState<ScalpingSensitivity>("balanced");
   const [orbDuration, setOrbDuration] = useState<OrbDuration>(30);
   const [orbRequireRetest, setOrbRequireRetest] = useState(false);
@@ -61,12 +62,12 @@ export function MainDashboard() {
   const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
   const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, scalpingSensitivity, spread, symbolProfile }),
-    [analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
+    [analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, riskSettings, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -195,10 +196,12 @@ export function MainDashboard() {
             onMovingAverageTypeChange={setMovingAverageType}
             onOrbDurationChange={setOrbDuration}
             onOrbRequireRetestChange={setOrbRequireRetest}
+            onQuickEntryModeChange={setQuickEntryMode}
             onSensitivityChange={setScalpingSensitivity}
             orbDuration={orbDuration}
             orbRequireRetest={orbRequireRetest}
             plan={plan}
+            quickEntryMode={quickEntryMode}
             sensitivity={scalpingSensitivity}
           />
           <TradingAlertsPanel
@@ -231,6 +234,7 @@ export function MainDashboard() {
             onTimeframeChange={setActiveTimeframe}
           />
 
+          <QuickAnalysisResultPanel plan={plan} />
           <MarketScenarioPanel plan={plan} />
 
           <section className="grid gap-3 md:grid-cols-2 2xl:grid-cols-4">
@@ -332,6 +336,79 @@ function MarketScenarioPanel({ plan }: { plan: TradePlan }) {
       </div>
     </section>
   );
+}
+
+function QuickAnalysisResultPanel({ plan }: { plan: TradePlan }) {
+  const quick = plan.quickAnalysis;
+
+  if (plan.analysisDepth !== "quick" || !quick) {
+    return null;
+  }
+
+  const tone =
+    quick.signal === "BUY"
+      ? "border-emerald-300/25 bg-emerald-300/10"
+      : quick.signal === "SELL"
+        ? "border-rose-300/25 bg-rose-300/10"
+        : "border-amber-300/25 bg-amber-300/10";
+
+  return (
+    <section className={`rounded-md border p-3 ${tone}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-white/10 pb-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">Resultat Analyse Rapide</p>
+          <h3 className="mt-1 text-xl font-black text-white">{quick.status}</h3>
+          <p className="mt-1 text-xs leading-5 text-slate-300">H1 donne la direction. M15 prepare la zone. M5 declenche le timing.</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <SignalBadge signal={quick.signal} />
+          <span className="rounded-md border border-white/10 bg-black/25 px-3 py-2 font-mono text-sm font-black text-white">{quick.confidence}%</span>
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+        <SetupMetric label="Tendance H1" value={quick.h1Trend} />
+        <SetupMetric label="Mode entree" value={formatQuickEntryMode(quick.entryMode)} />
+        <SetupMetric label="Timeframe entree" value={quick.entryTimeframe} />
+        <SetupMetric label="Order Block principal" value={quick.orderBlockLabel} />
+        <SetupMetric label="Zone entree" value={`${formatPrice(quick.entryZone.low)} - ${formatPrice(quick.entryZone.high)}`} />
+        <SetupMetric label="Entry ideal" value={formatPrice(quick.idealEntry)} />
+        <SetupMetric label="Stop Loss" value={formatPrice(quick.stopLoss)} />
+        <SetupMetric label="Take Profit" value={formatPrice(quick.takeProfit)} />
+        <SetupMetric label="Risk Reward" value={quick.riskReward ? `1:${quick.riskReward.toFixed(2)}` : "--"} />
+        <SetupMetric label="RSI" value={quick.confirmations.rsi ? "Compatible" : "Non confirme"} />
+        <SetupMetric label="Price Action" value={quick.confirmations.priceAction ? "Validee" : "A confirmer"} />
+        <SetupMetric label="BOS / ChoCH" value={quick.confirmations.bosChoch ? "Detecte" : "A confirmer"} />
+      </div>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div className="rounded-md border border-white/10 bg-black/25 p-3">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-200">Raisons principales</p>
+          <div className="space-y-1.5 text-xs leading-5 text-slate-200">
+            {quick.reasons.length ? quick.reasons.map((reason) => <p key={reason}>- {reason}</p>) : <p>- En attente de structure exploitable.</p>}
+          </div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/25 p-3">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-amber-200">A attendre</p>
+          <div className="space-y-1.5 text-xs leading-5 text-slate-200">
+            {quick.missing.length ? quick.missing.map((item) => <p key={item}>- {item}</p>) : <p>- Verifier manuellement spread, lot size et execution avant entree.</p>}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatQuickEntryMode(mode: QuickEntryMode) {
+  if (mode === "safe") {
+    return "Securise";
+  }
+
+  if (mode === "fast") {
+    return "Rapide";
+  }
+
+  return "Mixte recommande";
 }
 
 function formatMarketPhase(phase: TradePlan["marketScenario"]["phase"]) {
@@ -705,10 +782,12 @@ function SignalModePanel({
   onMovingAverageTypeChange,
   onOrbDurationChange,
   onOrbRequireRetestChange,
+  onQuickEntryModeChange,
   onSensitivityChange,
   orbDuration,
   orbRequireRetest,
   plan,
+  quickEntryMode,
   sensitivity,
 }: {
   activeAnalysis?: TimeframeAnalysis;
@@ -722,10 +801,12 @@ function SignalModePanel({
   onMovingAverageTypeChange: (type: MovingAverageType) => void;
   onOrbDurationChange: (duration: OrbDuration) => void;
   onOrbRequireRetestChange: (enabled: boolean) => void;
+  onQuickEntryModeChange: (mode: QuickEntryMode) => void;
   onSensitivityChange: (sensitivity: ScalpingSensitivity) => void;
   orbDuration: OrbDuration;
   orbRequireRetest: boolean;
   plan: TradePlan;
+  quickEntryMode: QuickEntryMode;
   sensitivity: ScalpingSensitivity;
 }) {
   const scalpActive = plan.decision === "WATCH BUY" || plan.decision === "WATCH SELL" || plan.decision === "ORB BREAKOUT WATCH" || plan.decision === "FVG RETEST WATCH" || plan.decision === "BUY SCALP READY" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG BUY" || plan.decision === "STRONG SELL";
@@ -750,12 +831,20 @@ function SignalModePanel({
         <ModeButton active={analysisDepth === "quick"} label="Analyse rapide" onClick={() => onAnalysisDepthChange("quick")} />
         <ModeButton active={analysisDepth === "deep"} label="Analyse approfondie" onClick={() => onAnalysisDepthChange("deep")} />
       </div>
+      <div className="mt-2 rounded-md border border-amber-300/15 bg-amber-300/5 p-2">
+        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200">Entree Analyse rapide</p>
+        <div className="grid grid-cols-3 gap-1">
+          <SensitivityButton active={quickEntryMode === "safe"} label="Securise" onClick={() => onQuickEntryModeChange("safe")} />
+          <SensitivityButton active={quickEntryMode === "fast"} label="Rapide" onClick={() => onQuickEntryModeChange("fast")} />
+          <SensitivityButton active={quickEntryMode === "mixed"} label="Mixte" onClick={() => onQuickEntryModeChange("mixed")} />
+        </div>
+      </div>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <SetupMetric label="Mode actif" value={mode === "scalping" ? "Scalping" : "Conservative"} />
         <SetupMetric label="Analyse" value={analysisDepth === "quick" ? "Rapide" : "Approfondie"} />
         <SetupMetric label="Scalp status" value={scalpActive ? plan.decision : "WAIT"} />
         <SetupMetric label="Seuils" value={analysisDepth === "quick" ? "BUY/SELL 58" : "WATCH 50 / READY 58"} />
-        <SetupMetric label="Priorite" value="M1 / M5 puis M15" />
+        <SetupMetric label="Priorite rapide" value={quickEntryMode === "safe" ? "H1 -> M15" : quickEntryMode === "fast" ? "H1 -> M5" : "H1 -> M15 -> M5"} />
         <SetupMetric label="Sensibilite" value={formatSensitivity(sensitivity)} />
         <SetupMetric label="ORB status" value={orb?.status ?? "WAIT"} />
         <SetupMetric label="FVG" value={fvg ? `${fvg.direction} ${fvg.score}/100` : "attente"} />

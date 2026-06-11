@@ -9,6 +9,8 @@ import type {
   NewsEvent,
   OrbDuration,
   AnalysisDepth,
+  QuickEntryMode,
+  QuickAnalysisResult,
   ScalpingSensitivity,
   Signal,
   SignalMode,
@@ -78,6 +80,15 @@ interface MarketScenarioInput {
   symbolProfile: SymbolProfile;
 }
 
+interface QuickIntradayInput {
+  candleMap: Record<Timeframe, Candle[]>;
+  entryMode: QuickEntryMode;
+  newsRisk: boolean;
+  price: number;
+  spread: number | null;
+  symbolProfile: SymbolProfile;
+}
+
 export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
   for (const timeframe of timeframes) {
     const close = candleMap[timeframe].at(-1)?.close;
@@ -102,6 +113,7 @@ export function buildLiveTimeframeAnalyses({
   news,
   orbDuration = 30,
   orbRequireRetest = false,
+  quickEntryMode = "mixed",
   scalpingSensitivity = "balanced",
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
@@ -117,6 +129,7 @@ export function buildLiveTimeframeAnalyses({
   news: NewsEvent[];
   orbDuration?: OrbDuration;
   orbRequireRetest?: boolean;
+  quickEntryMode?: QuickEntryMode;
   scalpingSensitivity?: ScalpingSensitivity;
   spread?: number | null;
   symbolProfile?: SymbolProfile;
@@ -152,7 +165,8 @@ export function buildLiveTimeframeAnalyses({
       : withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe });
     const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
-    const decision = analysisDepth === "quick" ? evaluateQuickSignal({
+    const quickAnalysis = analysisDepth === "quick" ? buildQuickIntradayAnalysis({ candleMap, entryMode: quickEntryMode, newsRisk: redNewsNearby, price, spread, symbolProfile }) : null;
+    const decision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
       analysis,
       candleMap,
       candles,
@@ -210,6 +224,7 @@ export function buildLiveTimeframeAnalyses({
       orb: analysis.orb,
       trendFilter: analysis.trendFilter,
       marketScenario,
+      quickAnalysis,
       riskReward: Number(riskReward.toFixed(2)),
       summary: `${decision.waitReason}. ${decision.missingConditions.length ? `Missing: ${decision.missingConditions.join(", ")}.` : "Conditions validees."}`,
     };
@@ -229,6 +244,7 @@ export function buildLiveTradePlan({
   orbDuration = 30,
   orbRequireRetest = false,
   preferredTimeframe,
+  quickEntryMode = "mixed",
   riskSettings = defaultRiskSettings,
   scalpingSensitivity = "balanced",
   spread = null,
@@ -246,6 +262,7 @@ export function buildLiveTradePlan({
   orbDuration?: OrbDuration;
   orbRequireRetest?: boolean;
   preferredTimeframe?: Timeframe;
+  quickEntryMode?: QuickEntryMode;
   riskSettings?: RiskSettings;
   scalpingSensitivity?: ScalpingSensitivity;
   spread?: number | null;
@@ -298,6 +315,7 @@ export function buildLiveTradePlan({
       orb: null,
       trendFilter: null,
       marketScenario: createEmptyMarketScenario(),
+      quickAnalysis: null,
       accountRisk: buildAccountRiskSummary(normalizedRiskSettings, 0),
     };
   }
@@ -316,7 +334,8 @@ export function buildLiveTradePlan({
     : withOrderBlock({ analysis: baseAnalysis, candles, engine, higherTimeframeTrend: higherTimeframe.trend, movingAveragePeriod, movingAverageType, newsRisk: redNewsNearby, orbDuration, orbRequireRetest, riskReward, spread, timeframe: analysisTimeframe });
   const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
-  const decision = analysisDepth === "quick" ? evaluateQuickSignal({
+  const quickAnalysis = analysisDepth === "quick" ? buildQuickIntradayAnalysis({ candleMap, entryMode: quickEntryMode, newsRisk: redNewsNearby, price, spread, symbolProfile }) : null;
+  const decision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
     analysis,
     candleMap,
     candles,
@@ -350,10 +369,13 @@ export function buildLiveTradePlan({
   });
   const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
   const fvgPlan = analysis.fvgAnalysis;
-  const planDirection = orbPlan?.direction ?? direction;
-  const plannedEntry = getPlannedEntry({ fvg: fvgPlan, orb: orbPlan, price });
-  const plannedStopLoss = round(orbPlan ? orbPlan.stopLoss : stopLoss);
-  const plannedTakeProfits = getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
+  const quickDirection = quickAnalysis?.signal === "BUY" ? "Bullish" : quickAnalysis?.signal === "SELL" ? "Bearish" : quickAnalysis?.h1Direction ?? direction;
+  const planDirection = analysisDepth === "quick" ? quickDirection : orbPlan?.direction ?? direction;
+  const plannedEntry = analysisDepth === "quick" && quickAnalysis ? quickAnalysis.idealEntry : getPlannedEntry({ fvg: fvgPlan, orb: orbPlan, price });
+  const plannedStopLoss = analysisDepth === "quick" && quickAnalysis ? quickAnalysis.stopLoss : round(orbPlan ? orbPlan.stopLoss : stopLoss);
+  const plannedTakeProfits = analysisDepth === "quick" && quickAnalysis
+    ? [quickAnalysis.takeProfit, quickAnalysis.takeProfit, quickAnalysis.takeProfit].map(round) as [number, number, number]
+    : getPlannedTakeProfits({ direction: planDirection, fallbackTakeProfits: takeProfits, orb: orbPlan, support: analysis.support, resistance: analysis.resistance });
   const plannedRiskReward = plannedEntry && plannedStopLoss ? calculateRiskReward(plannedEntry, plannedStopLoss, plannedTakeProfits[0]) : riskReward;
   const plannedStopDistance = Math.abs(plannedEntry - plannedStopLoss);
   const entryQuality = analysisDepth === "quick" ? evaluateQuickEntryQuality({ decision, direction: planDirection, marketScenario }) : evaluateScenarioEntryQuality({ decision, direction: planDirection, marketScenario });
@@ -375,7 +397,7 @@ export function buildLiveTradePlan({
     waitReason: riskAdjustedDecision.waitReason,
     missingConditions: riskAdjustedDecision.missingConditions,
     score: riskAdjustedDecision.confidence,
-    summary: `${summarizeDecision(riskAdjustedDecision.signal, direction, mode, analysisDepth)} ${riskAdjustedDecision.waitReason}. ${analysisDepth === "quick" ? describeQuickAnalysis(analysis) : `${describeOrderBlock(analysis)} ${describeOrbFvg(analysis)}`} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
+    summary: `${summarizeDecision(riskAdjustedDecision.signal, direction, mode, analysisDepth)} ${riskAdjustedDecision.waitReason}. ${analysisDepth === "quick" && quickAnalysis ? describeQuickIntradayAnalysis(quickAnalysis) : analysisDepth === "quick" ? describeQuickAnalysis(analysis) : `${describeOrderBlock(analysis)} ${describeOrbFvg(analysis)}`} ${fundamental.cautionMessage ?? getDecisionStrength(scoring.total)}.`,
     entry: round(plannedEntry),
     stopLoss: plannedStopLoss,
     takeProfits: plannedTakeProfits,
@@ -387,10 +409,10 @@ export function buildLiveTradePlan({
       accountRisk.riskWarning ? `Capital/risk guard: ${accountRisk.riskWarning}` : `Capital guard OK: max loss $${accountRisk.maxLoss.toFixed(2)}, lot ${calculateLotSize({ capital: normalizedRiskSettings.capital, riskPercent: normalizedRiskSettings.riskPercent, stopLossDistance: plannedStopDistance, pipValue: normalizedRiskSettings.pipValue }).toFixed(2)}.`,
       "TP1 default is RR 1:1; take partial profit at TP1.",
       "After TP1 is reached, move Stop Loss to Break Even.",
-      analysisDepth === "quick" ? "Analyse rapide: essential factors only, no advanced ORB/FVG wait." : mode === "scalping" ? "Scalping has higher risk and requires strict stop loss." : "Conservative mode requires stronger confirmation.",
+      analysisDepth === "quick" ? "Analyse rapide: H1 direction, M15 zone, M5 timing. H1 ne declenche pas l'entree." : mode === "scalping" ? "Scalping has higher risk and requires strict stop loss." : "Conservative mode requires stronger confirmation.",
       analysis.liquiditySweep ? "Liquidity sweep detecte sur les bougies live." : "Pas de sweep confirme pour l'instant.",
       analysisDepth === "quick" ? `Basic zones: support ${round(analysis.support)}, resistance ${round(analysis.resistance)}.` : describeOrderBlock(analysis),
-      analysisDepth === "quick" ? describeQuickAnalysis(analysis) : analysis.orb ? `${analysis.orb.status}: ${analysis.orb.missingConfirmation}` : `${engine.settings.name}: ${symbolProfile.strategy}`,
+      analysisDepth === "quick" && quickAnalysis ? describeQuickIntradayAnalysis(quickAnalysis) : analysisDepth === "quick" ? describeQuickAnalysis(analysis) : analysis.orb ? `${analysis.orb.status}: ${analysis.orb.missingConfirmation}` : `${engine.settings.name}: ${symbolProfile.strategy}`,
       analysisDepth === "quick" ? "Advanced FVG/ORB confirmation is skipped in Analyse rapide." : analysis.fvgAnalysis ? `FVG ${analysis.fvgAnalysis.direction} ${analysis.fvgAnalysis.score}/100, fill ${analysis.fvgAnalysis.fillPercent}%: ${analysis.fvgAnalysis.missingConfirmation}` : "No fresh M1/M5/M15 FVG confirmation.",
       "Order Block is an analysis zone, not a guaranteed entry.",
       fundamental.usdInterpretation,
@@ -402,6 +424,7 @@ export function buildLiveTradePlan({
     orb: analysis.orb,
     trendFilter: analysis.trendFilter,
     marketScenario,
+    quickAnalysis,
     accountRisk,
   };
 }
@@ -702,6 +725,223 @@ function createEmptyMarketScenario(): MarketScenario {
     validatedConfirmations: [],
     waitZone: { low: 0, high: 0, label: "ATTENTE" },
   };
+}
+
+function buildQuickIntradayAnalysis({
+  candleMap,
+  entryMode,
+  newsRisk,
+  price,
+  spread,
+  symbolProfile,
+}: QuickIntradayInput): QuickAnalysisResult {
+  const h1Candles = candleMap.H1;
+  const m15Candles = candleMap.M15;
+  const m5Candles = candleMap.M5;
+  const hasH1 = h1Candles.length >= MIN_ANALYSIS_CANDLES;
+  const hasM15 = m15Candles.length >= MIN_ANALYSIS_CANDLES;
+  const hasM5 = m5Candles.length >= MIN_ANALYSIS_CANDLES;
+  const reasons: string[] = [];
+  const missing: string[] = [];
+
+  if (!hasH1) {
+    return createWaitingQuickAnalysis({
+      entryMode,
+      missing: ["Bougies H1 insuffisantes"],
+      price,
+      reason: "H1 requis pour donner le contexte principal.",
+    });
+  }
+
+  const h1 = analyzeCandles(h1Candles);
+  const h1Direction = inferDirection(h1);
+  const h1Trend = h1Direction === "Bullish" ? "Haussiere" : h1Direction === "Bearish" ? "Baissiere" : "Neutre";
+  const h1OrderBlock = detectOrderBlock({ candles: h1Candles, higherTimeframeTrend: h1.trend, riskReward: 1.5 });
+  const m15 = hasM15 ? analyzeCandles(m15Candles) : null;
+  const m5 = hasM5 ? analyzeCandles(m5Candles) : null;
+  const entryTimeframe: "M15" | "M5" = entryMode === "safe" ? "M15" : entryMode === "fast" ? "M5" : hasM5 ? "M5" : "M15";
+  const entryCandles = entryTimeframe === "M5" ? m5Candles : m15Candles;
+  const entryAnalysis = entryTimeframe === "M5" ? m5 : m15;
+  const refinementAnalysis = m15;
+  const latest = entryCandles.at(-1);
+  const previous = entryCandles.at(-2);
+  const atr = Math.max(entryAnalysis?.atr ?? h1.atr, price * 0.0008, 0.01);
+  const directionSignal: QuickAnalysisResult["signal"] = h1Direction === "Bullish" ? "BUY" : h1Direction === "Bearish" ? "SELL" : "WAIT";
+  const spreadOk = isSpreadAcceptable(spread, symbolProfile);
+
+  if (h1Direction === "Neutral" || h1.trend === "range") {
+    missing.push("H1 neutre ou contradictoire");
+  } else {
+    reasons.push(`Tendance H1 ${h1Trend.toLowerCase()}`);
+  }
+
+  if (h1.structure === "BOS" || h1.structure === "CHoCH" || h1.structure === "bullish" || h1.structure === "bearish") {
+    reasons.push(`Structure H1 lisible (${h1.structure})`);
+  } else {
+    missing.push("Structure H1 claire");
+  }
+
+  if (h1OrderBlock && h1OrderBlock.strength !== "ignored") {
+    reasons.push("Order Block H1 detecte");
+  } else {
+    missing.push("Order Block H1 valide");
+  }
+
+  if (!hasM15 || !refinementAnalysis) {
+    missing.push("Raffinement M15");
+  } else if (inferDirection(refinementAnalysis) === h1Direction || refinementAnalysis.structure === "BOS" || refinementAnalysis.structure === "CHoCH") {
+    reasons.push("Raffinement M15 confirme");
+  } else {
+    missing.push("M15 aligne avec H1");
+  }
+
+  if (!entryAnalysis || !latest || !previous) {
+    missing.push(`Timing ${entryTimeframe}`);
+  }
+
+  const entryDirection = entryAnalysis ? inferDirection(entryAnalysis) : "Neutral";
+  const body = latest ? Math.abs(latest.close - latest.open) : 0;
+  const bullishPriceAction = Boolean(latest && previous && latest.close > latest.open && latest.close > previous.close && body >= atr * 0.35);
+  const bearishPriceAction = Boolean(latest && previous && latest.close < latest.open && latest.close < previous.close && body >= atr * 0.35);
+  const priceAction = h1Direction === "Bullish" ? bullishPriceAction : h1Direction === "Bearish" ? bearishPriceAction : false;
+  const bosChoch = Boolean(entryAnalysis && (entryAnalysis.structure === "BOS" || entryAnalysis.structure === "CHoCH" || entryAnalysis.breakout || entryAnalysis.retestConfirmed));
+  const rsiOk = Boolean(entryAnalysis && (h1Direction === "Bullish" ? entryAnalysis.rsi >= 45 && entryAnalysis.rsi <= 72 : h1Direction === "Bearish" ? entryAnalysis.rsi <= 55 && entryAnalysis.rsi >= 28 : false));
+  const trendline = Boolean(entryAnalysis && (h1Direction === "Bullish" ? entryAnalysis.ema20 >= entryAnalysis.ema50 : h1Direction === "Bearish" ? entryAnalysis.ema20 <= entryAnalysis.ema50 : false));
+  const fibonacci = latest ? isNearRetracement({ direction: h1Direction, high: h1.resistance, low: h1.support, price: latest.close }) : false;
+  const crt = Boolean(entryAnalysis && latest && previous && ((h1Direction === "Bullish" && latest.low < previous.low && latest.close > previous.open) || (h1Direction === "Bearish" && latest.high > previous.high && latest.close < previous.open)));
+  const liquidity = Boolean(entryAnalysis?.liquiditySweep || entryAnalysis?.liquidity.sweepDetected || entryAnalysis?.liquidity.rejectionConfirmed);
+  const orderBlockReaction = Boolean(h1OrderBlock && latest && latest.low <= h1OrderBlock.high + atr && latest.high >= h1OrderBlock.low - atr);
+
+  if (priceAction) {
+    reasons.push(`Price Action ${entryTimeframe} favorable`);
+  } else {
+    missing.push(`Confirmation Price Action ${entryTimeframe}`);
+  }
+
+  if (entryDirection === h1Direction || priceAction || bosChoch) {
+    reasons.push(`Signal dans le sens H1 via ${entryTimeframe}`);
+  } else if (h1Direction !== "Neutral") {
+    missing.push(`Timing ${entryTimeframe} dans le sens H1`);
+  }
+
+  if (!spreadOk) {
+    missing.push("Spread acceptable");
+  }
+
+  if (newsRisk) {
+    missing.push("News USD rouge safe");
+  }
+
+  if (rsiOk) reasons.push("RSI compatible");
+  if (trendline) reasons.push("Trendline/EMA compatible");
+  if (fibonacci) reasons.push("Prix proche d'un retracement Fibonacci utile");
+  if (crt) reasons.push("CRT reaction detectee");
+  if (liquidity) reasons.push("Zone de liquidite/rejet detectee");
+  if (orderBlockReaction) reasons.push("Reaction du prix sur Order Block");
+  if (bosChoch) reasons.push("BOS/ChoCH ou cassure locale detectee");
+
+  const obLow = h1OrderBlock?.low ?? (h1Direction === "Bullish" ? h1.support : Math.max(price, h1.resistance - atr));
+  const obHigh = h1OrderBlock?.high ?? (h1Direction === "Bearish" ? h1.resistance : Math.min(price, h1.support + atr));
+  const entryZoneLow = h1Direction === "Bullish" ? Math.min(obLow, price - atr * 0.25) : Math.max(price - atr * 0.35, obLow);
+  const entryZoneHigh = h1Direction === "Bullish" ? Math.min(price + atr * 0.35, obHigh) : Math.max(obHigh, price + atr * 0.25);
+  const idealEntry = h1Direction === "Bullish"
+    ? round((Math.min(entryZoneLow, entryZoneHigh) + Math.min(price, Math.max(entryZoneLow, entryZoneHigh))) / 2)
+    : round((Math.max(entryZoneLow, entryZoneHigh) + Math.max(price, Math.min(entryZoneLow, entryZoneHigh))) / 2);
+  const stopLoss = h1Direction === "Bearish"
+    ? round(Math.max(h1.resistance, obHigh, price) + atr * 0.55)
+    : round(Math.min(h1.support || price, obLow, price) - atr * 0.55);
+  const risk = Math.max(Math.abs(idealEntry - stopLoss), atr * 0.7);
+  const takeProfit = h1Direction === "Bearish" ? round(idealEntry - risk * 2) : round(idealEntry + risk * 2);
+  const riskReward = calculateRiskReward(idealEntry, stopLoss, takeProfit);
+  const mandatoryOk = h1Direction !== "Neutral" && h1OrderBlock && hasM15 && refinementAnalysis && priceAction && spreadOk && !newsRisk && entryDirection !== oppositeDirection(h1Direction);
+  const confirmationCount = [rsiOk, trendline, fibonacci, crt, liquidity, orderBlockReaction, bosChoch].filter(Boolean).length;
+  const confidence = clamp(
+    (h1Direction !== "Neutral" ? 20 : 0) +
+      (h1OrderBlock ? 18 : 0) +
+      (hasM15 && refinementAnalysis && inferDirection(refinementAnalysis) === h1Direction ? 14 : 0) +
+      (priceAction ? 18 : 0) +
+      (entryDirection === h1Direction ? 10 : 0) +
+      confirmationCount * 4 +
+      (riskReward >= 1.5 ? 8 : riskReward >= 1 ? 4 : 0),
+    100,
+  );
+  const signal: QuickAnalysisResult["signal"] = mandatoryOk && confidence >= 62 ? directionSignal : "WAIT";
+  const status: QuickAnalysisResult["status"] = signal === "WAIT" ? (h1Direction === "Neutral" || missing.length > 4 ? "Pas de trade" : "Attendre confirmation") : "Entree valide";
+
+  return {
+    signal,
+    h1Trend,
+    h1Direction,
+    entryTimeframe,
+    entryMode,
+    orderBlockLabel: h1OrderBlock ? `${h1OrderBlock.direction} H1 OB ${h1OrderBlock.score}/100` : "Aucun Order Block H1 valide",
+    orderBlockZone: { low: round(Math.min(obLow, obHigh)), high: round(Math.max(obLow, obHigh)), label: "Order Block H1" },
+    entryZone: { low: round(Math.min(entryZoneLow, entryZoneHigh)), high: round(Math.max(entryZoneLow, entryZoneHigh)), label: "Entry Zone" },
+    idealEntry,
+    stopLoss,
+    takeProfit,
+    riskReward: Number(riskReward.toFixed(2)),
+    confidence,
+    status,
+    reasons: reasons.slice(0, 10),
+    missing: Array.from(new Set(missing)).slice(0, 8),
+    confirmations: { bosChoch, crt, fibonacci, liquidity, orderBlockReaction, priceAction, rsi: rsiOk, trendline },
+  };
+}
+
+function createWaitingQuickAnalysis({ entryMode, missing, price, reason }: { entryMode: QuickEntryMode; missing: string[]; price: number; reason: string }): QuickAnalysisResult {
+  return {
+    signal: "WAIT" as const,
+    h1Trend: "Neutre" as const,
+    h1Direction: "Neutral" as const,
+    entryTimeframe: entryMode === "safe" ? "M15" as const : "M5" as const,
+    entryMode,
+    orderBlockLabel: "Aucun Order Block H1 valide",
+    orderBlockZone: { low: 0, high: 0, label: "Order Block H1" },
+    entryZone: { low: 0, high: 0, label: "Entry Zone" },
+    idealEntry: round(price || 0),
+    stopLoss: 0,
+    takeProfit: 0,
+    riskReward: 0,
+    confidence: 0,
+    status: "Pas de trade" as const,
+    reasons: [reason],
+    missing,
+    confirmations: { bosChoch: false, crt: false, fibonacci: false, liquidity: false, orderBlockReaction: false, priceAction: false, rsi: false, trendline: false },
+  };
+}
+
+function evaluateQuickIntradayDecision(quick: NonNullable<TradePlan["quickAnalysis"]>): DecisionResult {
+  if (quick.signal === "WAIT") {
+    return {
+      confidence: quick.confidence,
+      missingConditions: quick.missing,
+      signal: "WAIT",
+      waitReason: quick.status === "Attendre confirmation" ? `WAIT: ${quick.missing[0] ?? "confirmation M15/M5 requise"}` : "WAIT: contexte H1 ou setup intraday invalide",
+    };
+  }
+
+  return {
+    confidence: quick.confidence,
+    missingConditions: quick.missing,
+    signal: quick.signal,
+    waitReason: `${quick.signal}: H1 donne la direction, ${quick.entryTimeframe} confirme l'entree.`,
+  };
+}
+
+function oppositeDirection(direction: Direction) {
+  return direction === "Bullish" ? "Bearish" : direction === "Bearish" ? "Bullish" : "Neutral";
+}
+
+function isNearRetracement({ direction, high, low, price }: { direction: Direction; high: number; low: number; price: number }) {
+  if (direction === "Neutral" || !Number.isFinite(high) || !Number.isFinite(low) || high <= low || price <= 0) {
+    return false;
+  }
+
+  const range = high - low;
+  const fib50 = direction === "Bullish" ? high - range * 0.5 : low + range * 0.5;
+  const fib618 = direction === "Bullish" ? high - range * 0.618 : low + range * 0.618;
+  return Math.min(Math.abs(price - fib50), Math.abs(price - fib618)) <= range * 0.08;
 }
 
 function evaluateSignalTiming({
@@ -2114,6 +2354,14 @@ function describeQuickAnalysis(analysis: TechnicalAnalysis) {
   return `Analyse rapide: trend ${analysis.trend}, structure ${analysis.structure}, support ${round(analysis.support)}, resistance ${round(analysis.resistance)}, volatilite ${analysis.volatility}.`;
 }
 
+function describeQuickIntradayAnalysis(quick: NonNullable<TradePlan["quickAnalysis"]>) {
+  return `Analyse rapide intraday: H1 ${quick.h1Trend}, entree ${quick.entryTimeframe}, zone ${round(quick.entryZone.low)}-${round(quick.entryZone.high)}, score ${quick.confidence}/100.`;
+}
+
+function isSpreadAcceptable(spread: number | null, symbolProfile: SymbolProfile) {
+  return spread === null || !symbolProfile.spreadWarning || spread <= symbolProfile.spreadWarning;
+}
+
 function getStopLoss(direction: Direction, price: number, support: number, resistance: number, fallbackDistance: number) {
   if (direction === "Bearish") {
     return resistance > price ? resistance + fallbackDistance * 0.25 : price + fallbackDistance;
@@ -2230,6 +2478,7 @@ function emptyTimeframeAnalysis({
     orb: null,
     trendFilter: null,
     marketScenario: createEmptyMarketScenario(),
+    quickAnalysis: null,
     riskReward: 0,
     summary: waitReason,
   };

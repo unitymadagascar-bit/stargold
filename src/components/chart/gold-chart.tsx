@@ -15,7 +15,7 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketTick, OrbAnalysis, OrderBlockZone, SymbolProfile, Timeframe, TradePlan } from "@/types";
+import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketScenarioLevel, MarketTick, OrbAnalysis, OrderBlockZone, SymbolProfile, Timeframe, TradePlan } from "@/types";
 import { calculateRSI } from "@/lib/indicators";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -28,14 +28,29 @@ const defaultDisplaySettings: ChartDisplaySettings = {
   showLastPriceLine: false,
   showPeriodSeparators: false,
   showGrid: true,
-  showTradeLevels: false,
+  showTradeLevels: true,
   showOrderBlocks: true,
+  showOrderBlocksH1: true,
+  showOrderBlocksM15: true,
   showLiquidityLevels: false,
   showRsi: true,
   showOrb: true,
   showFvg: true,
   showScenarioAnalysis: true,
   showRiskRewardBox: true,
+  showMarketStructure: true,
+  showHhHl: false,
+  showBos: true,
+  showChoch: true,
+  showTrendline: false,
+  showFibonacci: false,
+  showCrtLevels: false,
+  showRejectionZones: true,
+  showEntryZone: true,
+  showStopLoss: true,
+  showTakeProfit: true,
+  showBuySellSignal: true,
+  showQuickAnalysisSummary: true,
   showLegend: false,
   showEmptyHelper: true,
 };
@@ -432,9 +447,15 @@ export function GoldChart({
     }
 
     if (displaySettings.showTradeLevels) {
+      if (displaySettings.showEntryZone) {
       addPriceLine(series, priceLineRefs.current, plan.entry, "#facc15", "Entry");
+      }
+      if (displaySettings.showStopLoss) {
       addPriceLine(series, priceLineRefs.current, plan.stopLoss, "#fb7185", "SL");
-      plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
+      }
+      if (displaySettings.showTakeProfit) {
+        plan.takeProfits.forEach((target, index) => addPriceLine(series, priceLineRefs.current, target, "#34d399", `TP${index + 1}`));
+      }
     }
 
     if (displaySettings.showRiskRewardBox && plan.decision !== "WAIT") {
@@ -444,7 +465,7 @@ export function GoldChart({
       addPriceLine(series, priceLineRefs.current, plan.takeProfits[1], "#22c55e", "RR TP2");
     }
 
-    if (displaySettings.showOrderBlocks && activeOrderBlock) {
+    if (displaySettings.showOrderBlocks && (displaySettings.showOrderBlocksH1 || displaySettings.showOrderBlocksM15) && activeOrderBlock) {
       const color = activeOrderBlock.direction === "bullish" ? "#22c55e" : "#ef4444";
       addPriceLine(series, priceLineRefs.current, activeOrderBlock.high, color, `OB ${activeOrderBlock.score}/100`);
       addPriceLine(series, priceLineRefs.current, activeOrderBlock.low, color, activeOrderBlock.strength);
@@ -477,7 +498,7 @@ export function GoldChart({
     }
 
     const updateOverlay = () => {
-      const overlay = buildScenarioOverlay({ plan, series });
+      const overlay = buildScenarioOverlay({ plan, series, settings: displaySettings });
       setScenarioOverlay(overlay);
     };
 
@@ -489,13 +510,13 @@ export function GoldChart({
       chart.unsubscribeCrosshairMove(updateOverlay);
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(updateOverlay);
     };
-  }, [candles.length, displaySettings.showScenarioAnalysis, plan, timeframe]);
+  }, [candles.length, displaySettings, plan, timeframe]);
 
   useEffect(() => {
     const activeOrderBlock = orderBlock ?? plan.orderBlock;
     const series = seriesRef.current;
 
-    if (!series || !activeOrderBlock || !displaySettings.showOrderBlocks) {
+    if (!series || !activeOrderBlock || !displaySettings.showOrderBlocks || (!displaySettings.showOrderBlocksH1 && !displaySettings.showOrderBlocksM15)) {
       setOrderBlockOverlay(null);
       return;
     }
@@ -919,6 +940,62 @@ function DisplaySettingsPanel({
     onChange({ ...settings, [key]: value });
   }
 
+  function applySimpleMode() {
+    onChange({
+      ...settings,
+      showBos: false,
+      showBuySellSignal: true,
+      showChoch: false,
+      showCrtLevels: false,
+      showEntryZone: true,
+      showFibonacci: false,
+      showFvg: false,
+      showHhHl: false,
+      showLiquidityLevels: false,
+      showMarketStructure: false,
+      showOrderBlocks: true,
+      showOrderBlocksH1: true,
+      showOrderBlocksM15: false,
+      showQuickAnalysisSummary: true,
+      showRejectionZones: false,
+      showRiskRewardBox: true,
+      showRsi: false,
+      showScenarioAnalysis: true,
+      showStopLoss: true,
+      showTakeProfit: true,
+      showTradeLevels: true,
+      showTrendline: false,
+    });
+  }
+
+  function applyDetailsMode() {
+    onChange({
+      ...settings,
+      showBos: true,
+      showBuySellSignal: true,
+      showChoch: true,
+      showCrtLevels: true,
+      showEntryZone: true,
+      showFibonacci: true,
+      showFvg: true,
+      showHhHl: true,
+      showLiquidityLevels: true,
+      showMarketStructure: true,
+      showOrderBlocks: true,
+      showOrderBlocksH1: true,
+      showOrderBlocksM15: true,
+      showQuickAnalysisSummary: true,
+      showRejectionZones: true,
+      showRiskRewardBox: true,
+      showRsi: true,
+      showScenarioAnalysis: true,
+      showStopLoss: true,
+      showTakeProfit: true,
+      showTradeLevels: true,
+      showTrendline: true,
+    });
+  }
+
   return (
     <div className="absolute right-0 top-10 z-[60] w-72 rounded-md border border-white/15 bg-[#101419] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
       <div className="mb-2 flex items-center justify-between gap-3 border-b border-white/10 pb-2">
@@ -931,7 +1008,17 @@ function DisplaySettingsPanel({
         </button>
       </div>
 
-      <div className="grid gap-1.5 text-sm text-slate-200">
+      <div className="mb-3 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-black/25 p-1">
+        <button className="rounded px-2 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.06]" type="button" onClick={applySimpleMode}>
+          Mode simple
+        </button>
+        <button className="rounded px-2 py-1.5 text-xs font-semibold text-slate-200 transition hover:bg-white/[0.06]" type="button" onClick={applyDetailsMode}>
+          Mode details
+        </button>
+      </div>
+
+      <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-amber-200">Affichage graphique</p>
+      <div className="grid max-h-[60vh] gap-1.5 overflow-y-auto pr-1 text-sm text-slate-200">
         <DisplayToggle checked={settings.showTicker} label="Show ticker" onChange={(value) => update("showTicker", value)} />
         <DisplayToggle checked={settings.showOhlc} label="Show OHLC" onChange={(value) => update("showOhlc", value)} />
         <DisplayToggle checked={settings.showQuickTimeframes} label="Show quick timeframe buttons" onChange={(value) => update("showQuickTimeframes", value)} />
@@ -940,14 +1027,29 @@ function DisplaySettingsPanel({
         <DisplayToggle checked={settings.showLastPriceLine} label="Show last price line" onChange={(value) => update("showLastPriceLine", value)} />
         <DisplayToggle checked={settings.showPeriodSeparators} label="Show period separators" onChange={(value) => update("showPeriodSeparators", value)} />
         <DisplayToggle checked={settings.showGrid} label="Show grid" onChange={(value) => update("showGrid", value)} />
-        <DisplayToggle checked={settings.showLiquidityLevels} label="Show liquidity/support levels" onChange={(value) => update("showLiquidityLevels", value)} />
-        <DisplayToggle checked={settings.showOrderBlocks} label="Show order block zones" onChange={(value) => update("showOrderBlocks", value)} />
+        <DisplayToggle checked={settings.showOrderBlocksH1} label="Afficher Order Blocks H1" onChange={(value) => update("showOrderBlocksH1", value)} />
+        <DisplayToggle checked={settings.showOrderBlocksM15} label="Afficher Order Blocks M15" onChange={(value) => update("showOrderBlocksM15", value)} />
+        <DisplayToggle checked={settings.showOrderBlocks} label="Afficher zones Order Block" onChange={(value) => update("showOrderBlocks", value)} />
+        <DisplayToggle checked={settings.showMarketStructure} label="Afficher Structure du marche" onChange={(value) => update("showMarketStructure", value)} />
+        <DisplayToggle checked={settings.showHhHl} label="Afficher HH / HL / LH / LL" onChange={(value) => update("showHhHl", value)} />
+        <DisplayToggle checked={settings.showBos} label="Afficher BOS" onChange={(value) => update("showBos", value)} />
+        <DisplayToggle checked={settings.showChoch} label="Afficher ChoCH" onChange={(value) => update("showChoch", value)} />
+        <DisplayToggle checked={settings.showTrendline} label="Afficher Trendline" onChange={(value) => update("showTrendline", value)} />
+        <DisplayToggle checked={settings.showFibonacci} label="Afficher Fibonacci" onChange={(value) => update("showFibonacci", value)} />
+        <DisplayToggle checked={settings.showRsi} label="Afficher RSI" onChange={(value) => update("showRsi", value)} />
+        <DisplayToggle checked={settings.showCrtLevels} label="Afficher CRT Levels" onChange={(value) => update("showCrtLevels", value)} />
+        <DisplayToggle checked={settings.showLiquidityLevels} label="Afficher zones de liquidite" onChange={(value) => update("showLiquidityLevels", value)} />
+        <DisplayToggle checked={settings.showRejectionZones} label="Afficher zones de rejet" onChange={(value) => update("showRejectionZones", value)} />
+        <DisplayToggle checked={settings.showEntryZone} label="Afficher Entry Zone" onChange={(value) => update("showEntryZone", value)} />
+        <DisplayToggle checked={settings.showStopLoss} label="Afficher Stop Loss" onChange={(value) => update("showStopLoss", value)} />
+        <DisplayToggle checked={settings.showTakeProfit} label="Afficher Take Profit" onChange={(value) => update("showTakeProfit", value)} />
+        <DisplayToggle checked={settings.showRiskRewardBox} label="Afficher Risk Reward" onChange={(value) => update("showRiskRewardBox", value)} />
+        <DisplayToggle checked={settings.showBuySellSignal} label="Afficher Signal BUY / SELL" onChange={(value) => update("showBuySellSignal", value)} />
+        <DisplayToggle checked={settings.showQuickAnalysisSummary} label="Afficher resume Analyse rapide" onChange={(value) => update("showQuickAnalysisSummary", value)} />
         <DisplayToggle checked={settings.showTradeLevels} label="Show trade levels" onChange={(value) => update("showTradeLevels", value)} />
-        <DisplayToggle checked={settings.showRsi} label="Show RSI 14" onChange={(value) => update("showRsi", value)} />
         <DisplayToggle checked={settings.showOrb} label="Show ORB high/low" onChange={(value) => update("showOrb", value)} />
         <DisplayToggle checked={settings.showFvg} label="Show FVG zones" onChange={(value) => update("showFvg", value)} />
         <DisplayToggle checked={settings.showScenarioAnalysis} label="Afficher analyse graphique" onChange={(value) => update("showScenarioAnalysis", value)} />
-        <DisplayToggle checked={settings.showRiskRewardBox} label="Show Risk/Reward Box" onChange={(value) => update("showRiskRewardBox", value)} />
         <DisplayToggle checked={settings.showLegend} label="Show object descriptions" onChange={(value) => update("showLegend", value)} />
         <DisplayToggle checked={settings.showEmptyHelper} label="Show empty chart helper" onChange={(value) => update("showEmptyHelper", value)} />
       </div>
@@ -1276,14 +1378,25 @@ function addPriceLine(
   );
 }
 
-function buildScenarioOverlay({ plan, series }: { plan: TradePlan; series: ISeriesApi<"Candlestick"> }): ScenarioOverlay | null {
+function buildScenarioOverlay({ plan, series, settings }: { plan: TradePlan; series: ISeriesApi<"Candlestick">; settings: ChartDisplaySettings }): ScenarioOverlay | null {
   const scenario = plan.marketScenario;
+  const quick = plan.quickAnalysis;
+  const quickTone = quick?.h1Direction === "Bullish" ? "buy" : quick?.h1Direction === "Bearish" ? "sell" : "wait";
   const zones = [
-    buildScenarioZone(scenario.buyZone.low, scenario.buyZone.high, "ZONE ACHAT", "buy", series),
-    buildScenarioZone(scenario.sellZone.low, scenario.sellZone.high, "ZONE VENTE", "sell", series),
-    buildScenarioZone(scenario.waitZone.low, scenario.waitZone.high, "ATTENTE", "wait", series),
+    quick && settings.showEntryZone ? buildScenarioZone(quick.entryZone.low, quick.entryZone.high, "ENTRY ZONE", quickTone, series) : null,
+    !quick || settings.showMarketStructure ? buildScenarioZone(scenario.buyZone.low, scenario.buyZone.high, "ZONE ACHAT", "buy", series) : null,
+    !quick || settings.showMarketStructure ? buildScenarioZone(scenario.sellZone.low, scenario.sellZone.high, "ZONE VENTE", "sell", series) : null,
+    !quick || settings.showMarketStructure ? buildScenarioZone(scenario.waitZone.low, scenario.waitZone.high, "ATTENTE", "wait", series) : null,
   ].filter(Boolean) as ScenarioZoneOverlay[];
-  const levels = scenario.keyLevels
+  const quickLevels: MarketScenarioLevel[] = quick
+    ? [
+        settings.showEntryZone ? { label: "Entry", price: quick.idealEntry, tone: quickTone } : null,
+        settings.showStopLoss ? { label: "SL", price: quick.stopLoss, tone: quickTone === "buy" ? "sell" : "buy" } : null,
+        settings.showTakeProfit ? { label: "TP", price: quick.takeProfit, tone: quickTone } : null,
+      ].filter(Boolean) as MarketScenarioLevel[]
+    : [];
+  const structureLevels = settings.showLiquidityLevels || settings.showMarketStructure ? scenario.keyLevels : [];
+  const levels = [...quickLevels, ...structureLevels]
     .map((level) => {
       const y = series.priceToCoordinate(level.price);
       return y === null ? null : { ...level, y };
@@ -1302,6 +1415,8 @@ function buildScenarioOverlay({ plan, series }: { plan: TradePlan; series: ISeri
     pricePosition: scenario.pricePosition,
     primaryBias: scenario.primaryBias,
     requiredConfirmation: scenario.requiredConfirmation,
+    showBuySellSignal: settings.showBuySellSignal,
+    showSummary: settings.showQuickAnalysisSummary,
     zones,
   };
 }
@@ -1360,6 +1475,7 @@ function ScenarioVisualOverlay({ overlay }: { overlay: ScenarioOverlay }) {
         </div>
       ))}
 
+      {overlay.showSummary ? (
       <div className={`absolute left-3 top-3 max-w-[320px] rounded-md border px-3 py-2 shadow-[0_12px_38px_rgba(0,0,0,0.35)] ${scenarioTone}`}>
         <p className="text-[10px] font-black uppercase tracking-[0.16em]">{formatScenarioPhase(overlay.phase)}</p>
         <p className="mt-1 text-xs font-semibold leading-5">
@@ -1367,8 +1483,15 @@ function ScenarioVisualOverlay({ overlay }: { overlay: ScenarioOverlay }) {
         </p>
         <p className="mt-1 text-[11px] leading-4 opacity-90">{overlay.requiredConfirmation}</p>
       </div>
+      ) : null}
 
-      <div className="absolute bottom-3 right-3 rounded-md border border-white/10 bg-black/65 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-200 shadow-lg">
+      {overlay.showBuySellSignal ? (
+      <div className={`absolute bottom-3 right-3 rounded-md border px-3 py-2 text-[10px] font-black uppercase tracking-[0.12em] shadow-lg ${scenarioTone}`}>
+        {overlay.primaryBias === "Neutral" ? "WAIT" : overlay.primaryBias.toUpperCase()}
+      </div>
+      ) : null}
+
+      <div className="absolute bottom-3 left-3 rounded-md border border-white/10 bg-black/65 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-200 shadow-lg">
         Zone detectee != entree immediate
       </div>
     </div>
@@ -1646,6 +1769,8 @@ interface ScenarioOverlay {
   pricePosition: string;
   primaryBias: TradePlan["marketScenario"]["primaryBias"];
   requiredConfirmation: string;
+  showBuySellSignal: boolean;
+  showSummary: boolean;
   zones: ScenarioZoneOverlay[];
 }
 
@@ -1676,12 +1801,27 @@ interface ChartDisplaySettings {
   showGrid: boolean;
   showTradeLevels: boolean;
   showOrderBlocks: boolean;
+  showOrderBlocksH1: boolean;
+  showOrderBlocksM15: boolean;
   showLiquidityLevels: boolean;
   showRsi: boolean;
   showOrb: boolean;
   showFvg: boolean;
   showScenarioAnalysis: boolean;
   showRiskRewardBox: boolean;
+  showMarketStructure: boolean;
+  showHhHl: boolean;
+  showBos: boolean;
+  showChoch: boolean;
+  showTrendline: boolean;
+  showFibonacci: boolean;
+  showCrtLevels: boolean;
+  showRejectionZones: boolean;
+  showEntryZone: boolean;
+  showStopLoss: boolean;
+  showTakeProfit: boolean;
+  showBuySellSignal: boolean;
+  showQuickAnalysisSummary: boolean;
   showLegend: boolean;
   showEmptyHelper: boolean;
 }

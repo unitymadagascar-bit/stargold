@@ -22,6 +22,8 @@ export type SignalMode = "conservative" | "scalping";
 
 export type AnalysisDepth = "quick" | "deep";
 
+export type QuickEntryMode = "safe" | "fast" | "mixed";
+
 export type ScalpingSensitivity = "safe" | "balanced" | "aggressive";
 
 export type OrbDuration = 5 | 15 | 30;
@@ -326,6 +328,7 @@ export interface TimeframeAnalysis {
   orb: OrbAnalysis | null;
   trendFilter: TrendFilterAnalysis | null;
   marketScenario: MarketScenario;
+  quickAnalysis: QuickAnalysisResult | null;
   riskReward: number;
   summary: string;
 }
@@ -372,7 +375,37 @@ export interface TradePlan {
   orb: OrbAnalysis | null;
   trendFilter: TrendFilterAnalysis | null;
   marketScenario: MarketScenario;
+  quickAnalysis: QuickAnalysisResult | null;
   accountRisk: AccountRiskSummary;
+}
+
+export interface QuickAnalysisResult {
+  signal: "BUY" | "SELL" | "WAIT";
+  h1Trend: "Haussiere" | "Baissiere" | "Neutre";
+  h1Direction: Direction;
+  entryTimeframe: "M15" | "M5";
+  entryMode: QuickEntryMode;
+  orderBlockLabel: string;
+  orderBlockZone: MarketScenarioZone;
+  entryZone: MarketScenarioZone;
+  idealEntry: number;
+  stopLoss: number;
+  takeProfit: number;
+  riskReward: number;
+  confidence: number;
+  status: "Entree valide" | "Attendre confirmation" | "Pas de trade";
+  reasons: string[];
+  missing: string[];
+  confirmations: {
+    bosChoch: boolean;
+    crt: boolean;
+    fibonacci: boolean;
+    liquidity: boolean;
+    orderBlockReaction: boolean;
+    priceAction: boolean;
+    rsi: boolean;
+    trendline: boolean;
+  };
 }
 
 export interface MarketScenarioZone {

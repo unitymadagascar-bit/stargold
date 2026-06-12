@@ -195,6 +195,8 @@ export function MainDashboard() {
           <SignalModePanel
             activeAnalysis={activeAnalysis}
             analysisDepth={analysisDepth}
+            dataSyncStatus={dataCheck.status}
+            liveStatus={live.status}
             mode={signalMode}
             movingAveragePeriod={movingAveragePeriod}
             movingAverageType={movingAverageType}
@@ -872,6 +874,8 @@ function SetupPanel({ activeAnalysis, activeTimeframe, candleCount, plan }: { ac
 function SignalModePanel({
   activeAnalysis,
   analysisDepth,
+  dataSyncStatus,
+  liveStatus,
   mode,
   movingAveragePeriod,
   movingAverageType,
@@ -893,6 +897,8 @@ function SignalModePanel({
 }: {
   activeAnalysis?: TimeframeAnalysis;
   analysisDepth: AnalysisDepth;
+  dataSyncStatus: DataCheckSummary["status"];
+  liveStatus: LiveMarketState["status"];
   mode: SignalMode;
   movingAveragePeriod: number;
   movingAverageType: MovingAverageType;
@@ -927,6 +933,7 @@ function SignalModePanel({
   const orb = activeAnalysis?.orb ?? plan.orb;
   const fvg = activeAnalysis?.fvg ?? plan.fvg;
   const trendFilter = activeAnalysis?.trendFilter ?? plan.trendFilter;
+  const liveReady = liveStatus === "live" && dataSyncStatus === "SYNC OK";
 
   return (
     <section className="rounded-md border border-white/10 bg-[#171717] p-3">
@@ -943,6 +950,19 @@ function SignalModePanel({
       <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border border-white/10 bg-black/25 p-1">
         <ModeButton active={analysisDepth === "quick"} label="Analyse rapide" onClick={() => onAnalysisDepthChange("quick")} />
         <ModeButton active={analysisDepth === "deep"} label="Analyse approfondie" onClick={() => onAnalysisDepthChange("deep")} />
+      </div>
+      <div className={`mt-2 rounded-md border p-2 ${liveReady ? "border-emerald-300/20 bg-emerald-300/10" : "border-rose-300/20 bg-rose-300/10"}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white">Mode Scalping Live</p>
+          <span className={`rounded border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] ${liveReady ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100" : "border-rose-300/25 bg-rose-300/10 text-rose-100"}`}>
+            {liveReady ? "Tick streaming actif" : "Flux live indisponible"}
+          </span>
+        </div>
+        <p className="mt-1 text-xs leading-5 text-slate-200">
+          {liveReady
+            ? "Aucun polling lent: le graphique recoit les ticks du bridge live, M1/M5 prioritaires, overlays lourds recalcules seulement quand necessaire."
+            : "Flux live indisponible - analyse suspendue. Aucun BUY/SELL tant que le stream MT5/Exness n'est pas synchronise."}
+        </p>
       </div>
       <div className="mt-2 rounded-md border border-amber-300/15 bg-amber-300/5 p-2">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200">Entree Analyse rapide</p>
@@ -1724,12 +1744,13 @@ function buildDataCheck({
   const brokerSymbol = activeSync?.brokerSymbol ?? live.brokerSymbol ?? live.lastTick?.symbol ?? symbolProfile.symbol;
   const loadedAny = Object.values(loadedCounts).some((count) => count > 0);
   const sourceDifferent = loadedAny && (!activeSync?.official || !isExnessSource(sourceLabel));
-  const status: DataCheckSummary["status"] = sourceDifferent ? "SOURCE DIFFERENTE" : !enoughCoreHistory ? "HISTORIQUE INSUFFISANT" : staleMs > 20_000 ? "RETARD" : "SYNC OK";
+  const liveUnavailable = live.status !== "live";
+  const status: DataCheckSummary["status"] = sourceDifferent ? "SOURCE DIFFERENTE" : !enoughCoreHistory ? "HISTORIQUE INSUFFISANT" : staleMs > 20_000 || liveUnavailable ? "RETARD" : "SYNC OK";
   const statusMessage =
     status === "SYNC OK"
       ? "Les signaux utilisent les bougies OHLC MT5/Exness disponibles. Les bougies en formation restent non confirmees."
       : status === "RETARD"
-        ? "La derniere synchronisation MT5 est en retard. Evite les signaux scalping tant que le flux n'est pas frais."
+        ? "Flux live indisponible ou derniere synchronisation MT5 en retard. Analyse suspendue tant que le stream n'est pas frais."
         : status === "SOURCE DIFFERENTE"
           ? "Analyse suspendue : la source affichee ou chargee n'est pas confirmee MT5/Exness. Les signaux BUY/SELL sont bloques."
           : "Historique insuffisant pour analyse fiable. Les signaux sont bloques tant que les OHLC MT5 officiels ne sont pas charges.";

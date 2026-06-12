@@ -33,7 +33,6 @@ function createEmptyCandleSyncMap(): Record<Timeframe, CandleSyncState> {
 
 const streamUrl = process.env.NEXT_PUBLIC_XAUUSD_TICK_STREAM_URL || "/api/market/xauusd/stream";
 const historyUrl = process.env.NEXT_PUBLIC_XAUUSD_HISTORY_URL || "/api/market/xauusd/history";
-const tickPollUrl = process.env.NEXT_PUBLIC_XAUUSD_TICK_POLL_URL || "/api/market/xauusd/tick";
 const localBridgeOrigin = process.env.NEXT_PUBLIC_MT5_LOCAL_BRIDGE_ORIGIN || "http://127.0.0.1:3000";
 const serverOffsetMinutes = Number(process.env.NEXT_PUBLIC_MARKET_SERVER_UTC_OFFSET_MINUTES ?? 0);
 
@@ -55,7 +54,6 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
     () => ({
       history: getEndpointCandidates(historyUrl),
       stream: getEndpointCandidates(streamUrl),
-      tick: getEndpointCandidates(tickPollUrl),
     }),
     [],
   );
@@ -141,32 +139,34 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
     });
 
     async function loadHistory() {
-      const results: Array<{
+      const results = (
+        await Promise.all(
+          timeframes.map(async (timeframe) => {
+            try {
+              const payload = await fetchFirstHistoryJson(endpoints.history, timeframe, normalizedSymbol);
+              const source = getMarketSource(payload);
+              const brokerSymbol = getMarketSymbol(payload) ?? normalizedSymbol;
+              const updatedAt = getMarketUpdatedAt(payload);
+
+              return {
+                brokerSymbol,
+                candles: normalizeHistoryCandles(payload),
+                source,
+                timeframe,
+                updatedAt,
+              };
+            } catch {
+              return null;
+            }
+          }),
+        )
+      ).filter((result): result is {
         brokerSymbol: string;
         candles: Candle[];
         source: string | null;
         timeframe: Timeframe;
         updatedAt: string | null;
-      }> = [];
-
-      for (const timeframe of timeframes) {
-        try {
-          const payload = await fetchFirstHistoryJson(endpoints.history, timeframe, normalizedSymbol);
-          const source = getMarketSource(payload);
-          const brokerSymbol = getMarketSymbol(payload) ?? normalizedSymbol;
-          const updatedAt = getMarketUpdatedAt(payload);
-          results.push({
-            brokerSymbol,
-            candles: normalizeHistoryCandles(payload),
-            source,
-            timeframe,
-            updatedAt,
-          });
-          await wait(120);
-        } catch {
-          await wait(350);
-        }
-      }
+      } => Boolean(result));
 
       if (disposed) {
         return;
@@ -221,8 +221,6 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
     let disposed = false;
     let close: (() => void) | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let pollingStarted = false;
 
     function scheduleReconnect() {
       if (disposed) {
@@ -230,44 +228,13 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
       }
 
       retryRef.current += 1;
-      const delay = Math.min(2000 * retryRef.current, 12000);
+      const delay = Math.min(500 * retryRef.current, 2000);
       setState((current) => ({
         ...current,
         status: "reconnecting",
-        message: `Flux coupe. Reconnexion dans ${Math.round(delay / 1000)}s.`,
+        message: `Flux live coupe. Reconnexion immediate en cours.`,
       }));
       retryTimer = setTimeout(connect, delay);
-    }
-
-    async function pollTick() {
-      try {
-        const payload = await fetchFirstJson(addSymbolToUrls(endpoints.tick, normalizedSymbol));
-
-        processMessage(payload);
-      } catch (error) {
-        if (!disposed) {
-          setState((current) => ({
-            ...current,
-            status: current.lastTick ? "reconnecting" : "error",
-            message: error instanceof Error ? error.message : `Tick ${normalizedSymbol} indisponible.`,
-          }));
-        }
-      }
-    }
-
-    function startPolling() {
-      if (disposed || pollingStarted) {
-        return;
-      }
-
-      pollingStarted = true;
-      setState((current) => ({
-        ...current,
-        status: current.lastTick ? "reconnecting" : "connecting",
-        message: `Bascule sur polling HTTP ${normalizedSymbol}.`,
-      }));
-      pollTick();
-      pollTimer = setInterval(pollTick, 2500);
     }
 
     function connect() {
@@ -285,7 +252,7 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
 
         socket.addEventListener("open", () => {
           retryRef.current = 0;
-          setState((current) => ({ ...current, status: "live", message: `Flux ${normalizedSymbol} live connecte.` }));
+          setState((current) => ({ ...current, status: current.lastTick ? "live" : "connecting", message: `Flux ${normalizedSymbol} connecte, en attente du prochain tick live.` }));
         });
         socket.addEventListener("message", (event) => {
           try {
@@ -306,7 +273,7 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
 
       eventSource.addEventListener("open", () => {
         retryRef.current = 0;
-        setState((current) => ({ ...current, status: "live", message: `Flux ${normalizedSymbol} live connecte.` }));
+        setState((current) => ({ ...current, status: current.lastTick ? "live" : "connecting", message: `Flux ${normalizedSymbol} connecte, en attente du prochain tick live.` }));
       });
       const handleEventSourceMessage = (event: Event) => {
         const messageEvent = event as MessageEvent;
@@ -318,6 +285,9 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
       };
       eventSource.addEventListener("message", handleEventSourceMessage);
       eventSource.addEventListener("tick", handleEventSourceMessage);
+      eventSource.addEventListener("heartbeat", () => {
+        setState((current) => ({ ...current, status: current.lastTick ? "live" : current.status }));
+      });
       eventSource.addEventListener("market-error", (event) => {
         const messageEvent = event as MessageEvent;
 
@@ -340,7 +310,12 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
       });
       eventSource.addEventListener("error", () => {
         close?.();
-        startPolling();
+        setState((current) => ({
+          ...current,
+          status: "error",
+          message: "Flux live indisponible - analyse suspendue.",
+        }));
+        scheduleReconnect();
       });
     }
 
@@ -350,9 +325,6 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
       disposed = true;
       if (retryTimer) {
         clearTimeout(retryTimer);
-      }
-      if (pollTimer) {
-        clearInterval(pollTimer);
       }
       close?.();
     };
@@ -443,10 +415,6 @@ function normalizeBridgeSymbol(symbol: string) {
   ].sort((a, b) => b.length - a.length);
 
   return knownBase.find((base) => normalized === base || normalized.startsWith(base)) ?? normalized;
-}
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getMarketMessage(data: unknown) {

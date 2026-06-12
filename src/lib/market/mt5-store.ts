@@ -1,5 +1,6 @@
 import type { Candle, MarketTick, Timeframe } from "@/types";
 import { normalizeHistoryCandles, normalizeProviderTick } from "@/lib/market/candle-engine";
+import { publishMt5LiveEvent } from "@/lib/market/mt5-live-bus";
 import { timeframes } from "@/lib/market/timeframes";
 import { normalizeSymbol } from "@/lib/symbols/profiles";
 
@@ -91,6 +92,19 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
     await persistStoreUpdate({ changedHistories, store, tick });
   } catch (error) {
     console.warn("MT5 cloud persistence failed", error);
+  }
+
+  if (store.lastTick && store.updatedAt) {
+    publishMt5LiveEvent({
+      brokerSymbol: store.brokerSymbol,
+      candleCounts: getCounts(store.candleMap),
+      currentCandles: getCurrentCandles(store.candleMap),
+      lastClosedCandles: getLastClosedCandles(store.candleMap),
+      source: store.source,
+      symbol: store.symbol,
+      tick: store.lastTick,
+      updatedAt: store.updatedAt,
+    });
   }
 
   return {
@@ -228,6 +242,26 @@ function getCounts(candleMap: Record<Timeframe, Candle[]>) {
       [timeframe]: candleMap[timeframe].length,
     }),
     {} as Record<Timeframe, number>,
+  );
+}
+
+function getCurrentCandles(candleMap: Record<Timeframe, Candle[]>) {
+  return timeframes.reduce(
+    (accumulator, timeframe) => ({
+      ...accumulator,
+      [timeframe]: candleMap[timeframe].at(-1),
+    }),
+    {} as Partial<Record<Timeframe, Candle>>,
+  );
+}
+
+function getLastClosedCandles(candleMap: Record<Timeframe, Candle[]>) {
+  return timeframes.reduce(
+    (accumulator, timeframe) => ({
+      ...accumulator,
+      [timeframe]: candleMap[timeframe].at(-2) ?? candleMap[timeframe].at(-1),
+    }),
+    {} as Partial<Record<Timeframe, Candle>>,
   );
 }
 

@@ -25,7 +25,14 @@ type DirectionTone = "buy" | "sell" | "wait";
 export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysisSourceLabel, chartSourceLabel, executionSourceLabel, fundamental, plan, syncState }: FinalTradingDecisionProps) {
   const final = getFinalDecision({ activeAnalysis, activeTimeframe, fundamental, plan });
   const tone = getSignalTone(final.signal);
-  const confirmationPending = final.signal === "WAIT" || final.signal === "WATCH BUY" || final.signal === "WATCH SELL" || final.signal === "ORB BREAKOUT WATCH" || final.signal === "FVG RETEST WATCH";
+  const confirmationPending =
+    final.signal === "WAIT" ||
+    final.signal === "PRE-SIGNAL BUY" ||
+    final.signal === "PRE-SIGNAL SELL" ||
+    final.signal === "WATCH BUY" ||
+    final.signal === "WATCH SELL" ||
+    final.signal === "ORB BREAKOUT WATCH" ||
+    final.signal === "FVG RETEST WATCH";
 
   return (
     <section className={`mt-3 overflow-hidden rounded-md border ${tone.border} bg-[#101318] shadow-[0_24px_70px_rgba(0,0,0,0.28)]`}>
@@ -166,8 +173,8 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || plan.directionalBias === "Sell" || (signal !== "WAIT" && plan.direction === "Bearish");
-  const bullish = signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || plan.directionalBias === "Buy" || (signal !== "WAIT" && plan.direction === "Bullish");
+  const bearish = signal === "PRE-SIGNAL SELL" || signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || plan.directionalBias === "Sell" || (signal !== "WAIT" && plan.direction === "Bearish");
+  const bullish = signal === "PRE-SIGNAL BUY" || signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || plan.directionalBias === "Buy" || (signal !== "WAIT" && plan.direction === "Bullish");
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
   const orb = plan.orb ?? activeAnalysis?.orb;
@@ -181,7 +188,16 @@ function getFinalDecision({
   );
   const orderBlockValid = Boolean(orderBlock && orderBlock.score >= 60 && orderBlock.strength !== "ignored");
   const liquidityConfirmed = Boolean(liquidity && (liquidity.rejectionConfirmed || liquidity.realBreakoutContinuation || (liquidity.sweepDetected && activeAnalysis?.liquiditySweep)));
-  const m1Confirmation = Boolean(fvg?.rejectionConfirmed || plan.waitReason.includes("M1 confirmation detected") || (signal !== "WAIT" && signal !== "ORB BREAKOUT WATCH" && signal !== "FVG RETEST WATCH" && !plan.missingConditions.some((condition) => condition.includes("M1 rejection"))));
+  const m1Confirmation = Boolean(
+    fvg?.rejectionConfirmed ||
+      plan.waitReason.includes("M1 confirmation detected") ||
+      (signal !== "WAIT" &&
+        signal !== "PRE-SIGNAL BUY" &&
+        signal !== "PRE-SIGNAL SELL" &&
+        signal !== "ORB BREAKOUT WATCH" &&
+        signal !== "FVG RETEST WATCH" &&
+        !plan.missingConditions.some((condition) => condition.includes("M1 rejection"))),
+  );
   const rejectionConfirmed = Boolean(liquidity?.rejectionConfirmed || m1Confirmation || activeAnalysis?.structure === "BOS" || activeAnalysis?.structure === "CHoCH");
   const orbValid = Boolean(orb && orb.breakoutConfirmed && !orb.fakeBreakout && orb.status !== "ORB FAILED");
   const fvgValid = Boolean(fvg && fvg.score >= 50 && fvg.fillState !== "invalid" && fvg.fillState !== "full");
@@ -246,6 +262,14 @@ function getFinalDecision({
 }
 
 function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "PRE-SIGNAL BUY") {
+    return "PRE-SIGNAL BUY";
+  }
+
+  if (signal === "PRE-SIGNAL SELL") {
+    return "PRE-SIGNAL SELL";
+  }
+
   if (signal === "ORB BREAKOUT WATCH") {
     return bullish ? "WATCH BUY" : bearish ? "WATCH SELL" : "SURVEILLER";
   }
@@ -274,6 +298,10 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
 }
 
 function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
+    return "Pre-signal seulement. Ne pas entrer: attendre la cloture, le retest ou la confirmation indiquee.";
+  }
+
   if (signal === "ORB BREAKOUT WATCH") {
     return "Breakout detecte. Ne pas entrer: attendre la creation/retest FVG puis confirmation M1.";
   }
@@ -310,6 +338,14 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
 }
 
 function getDirectionBias({ bearish, bullish, plan, signal }: { bearish: boolean; bullish: boolean; plan: TradePlan; signal: Signal }) {
+  if (signal === "PRE-SIGNAL BUY") {
+    return "Pression BUY precoce";
+  }
+
+  if (signal === "PRE-SIGNAL SELL") {
+    return "Pression SELL precoce";
+  }
+
   if (signal === "ORB BREAKOUT WATCH") {
     return bullish ? "ORB BUY a surveiller" : bearish ? "ORB SELL a surveiller" : "ORB a surveiller";
   }
@@ -394,6 +430,14 @@ function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boo
 }
 
 function getNextConfirmation({ missingCondition, signal }: { missingCondition: string; signal: Signal }) {
+  if (signal === "PRE-SIGNAL BUY") {
+    return missingCondition || "Attendre retest FVG ou cloture au-dessus du dernier high.";
+  }
+
+  if (signal === "PRE-SIGNAL SELL") {
+    return missingCondition || "Attendre retest FVG ou cloture sous le dernier low.";
+  }
+
   if (signal === "ORB BREAKOUT WATCH") {
     return missingCondition || "Wait for same-direction FVG, then FVG retest.";
   }
@@ -424,6 +468,10 @@ function getNextConfirmation({ missingCondition, signal }: { missingCondition: s
 function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
   if (signal === "WAIT") {
     return "Do not enter. Wait for every checklist item to turn valid.";
+  }
+
+  if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
+    return "Pre-signal only. Do not enter until the exact confirmation appears.";
   }
 
   if (signal === "ORB BREAKOUT WATCH" || signal === "FVG RETEST WATCH") {
@@ -482,6 +530,10 @@ function getInvalidation({ orderBlock, plan, newsUnsafe, signal }: { orderBlock:
 
   if (signal === "WAIT") {
     return "Any entry is invalid until missing condition is confirmed";
+  }
+
+  if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
+    return plan.missingConditions.find((condition) => condition.toLowerCase().includes("invalidation")) ?? "Invalid if price cancels the micro structure before confirmation";
   }
 
   if (signal === "WATCH BUY" || signal === "WATCH SELL" || signal === "ORB BREAKOUT WATCH" || signal === "FVG RETEST WATCH") {
@@ -651,6 +703,14 @@ function ChecklistItem({ label, status }: { label: string; status: CheckStatus }
 }
 
 function getSignalTone(signal: Signal) {
+  if (signal === "PRE-SIGNAL BUY") {
+    return {
+      badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100",
+      border: "border-cyan-300/20",
+      header: "bg-cyan-300/10",
+    };
+  }
+
   if (signal === "STRONG BUY" || signal === "BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
     return {
       badge: "border-emerald-300/25 bg-emerald-300/10 text-emerald-100",
@@ -664,6 +724,14 @@ function getSignalTone(signal: Signal) {
       badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100",
       border: "border-cyan-300/20",
       header: "bg-cyan-300/10",
+    };
+  }
+
+  if (signal === "PRE-SIGNAL SELL") {
+    return {
+      badge: "border-yellow-300/25 bg-yellow-300/10 text-yellow-100",
+      border: "border-yellow-300/20",
+      header: "bg-yellow-300/10",
     };
   }
 

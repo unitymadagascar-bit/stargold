@@ -1,6 +1,19 @@
 export type Timeframe = "M1" | "M5" | "M15" | "M30" | "H1" | "H4" | "D1";
 
-export type Signal = "STRONG BUY" | "BUY" | "BUY SCALP READY" | "WATCH BUY" | "ORB BREAKOUT WATCH" | "FVG RETEST WATCH" | "WAIT" | "WATCH SELL" | "SELL SCALP READY" | "SELL" | "STRONG SELL";
+export type Signal =
+  | "STRONG BUY"
+  | "BUY"
+  | "BUY SCALP READY"
+  | "PRE-SIGNAL BUY"
+  | "WATCH BUY"
+  | "ORB BREAKOUT WATCH"
+  | "FVG RETEST WATCH"
+  | "WAIT"
+  | "PRE-SIGNAL SELL"
+  | "WATCH SELL"
+  | "SELL SCALP READY"
+  | "SELL"
+  | "STRONG SELL";
 
 export type AssetCategory = "Metals" | "Forex" | "Crypto" | "Indices" | "Energies" | "Commodities" | "Stocks";
 

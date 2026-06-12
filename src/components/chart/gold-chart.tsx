@@ -1625,7 +1625,7 @@ function buildRiskRewardOverlay({
   const compact = containerWidth < 560;
   const left = compact ? 30 : Math.max(48, Math.floor(containerWidth * 0.18));
   const width = compact ? Math.max(145, containerWidth - left - 54) : Math.max(210, Math.min(360, containerWidth * 0.42));
-  const preview = plan.decision.includes("WATCH");
+  const preview = plan.decision.includes("WATCH") || plan.decision.includes("PRE-SIGNAL");
   const tpForRatio = Math.abs(tp1 - entry);
   const riskForRatio = Math.abs(entry - stopLoss);
   const rr = riskForRatio > 0 ? tpForRatio / riskForRatio : plan.riskReward;
@@ -1704,7 +1704,7 @@ function RiskRewardNotice({ message }: { message: string }) {
 
 function getRiskRewardNotice(plan: TradePlan) {
   if (plan.decision === "WAIT" || plan.direction === "Neutral") {
-    return "Masque: la decision finale est WAIT. Le RR box apparait seulement quand un plan WATCH ou SCALP READY existe.";
+    return "Masque: la decision finale est WAIT. Le RR box apparait seulement quand un plan PRE-SIGNAL, WATCH ou SCALP READY existe.";
   }
 
   const validPrices = [plan.entry, plan.stopLoss, plan.takeProfits[0], plan.takeProfits[1]].every((price) => Number.isFinite(price) && price > 0);

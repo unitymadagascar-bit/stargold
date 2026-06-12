@@ -634,8 +634,8 @@ function MarketSummary({
   priceChangePercent: number;
   symbolProfile: SymbolProfile;
 }) {
-  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "SELL" || plan.decision === "STRONG SELL");
-  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "BUY" || plan.decision === "STRONG BUY");
+  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "PRE-SIGNAL SELL" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "SELL" || plan.decision === "STRONG SELL");
+  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "PRE-SIGNAL BUY" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "BUY" || plan.decision === "STRONG BUY");
   const scoreColor = bullish ? "#22c55e" : bearish ? "#ff333d" : "#f59e0b";
 
   return (
@@ -839,7 +839,17 @@ function SignalModePanel({
   quickEntryMode: QuickEntryMode;
   sensitivity: ScalpingSensitivity;
 }) {
-  const scalpActive = plan.decision === "WATCH BUY" || plan.decision === "WATCH SELL" || plan.decision === "ORB BREAKOUT WATCH" || plan.decision === "FVG RETEST WATCH" || plan.decision === "BUY SCALP READY" || plan.decision === "SELL SCALP READY" || plan.decision === "STRONG BUY" || plan.decision === "STRONG SELL";
+  const scalpActive =
+    plan.decision === "PRE-SIGNAL BUY" ||
+    plan.decision === "PRE-SIGNAL SELL" ||
+    plan.decision === "WATCH BUY" ||
+    plan.decision === "WATCH SELL" ||
+    plan.decision === "ORB BREAKOUT WATCH" ||
+    plan.decision === "FVG RETEST WATCH" ||
+    plan.decision === "BUY SCALP READY" ||
+    plan.decision === "SELL SCALP READY" ||
+    plan.decision === "STRONG BUY" ||
+    plan.decision === "STRONG SELL";
   const missing = activeAnalysis?.missingConditions ?? plan.missingConditions;
   const orb = activeAnalysis?.orb ?? plan.orb;
   const fvg = activeAnalysis?.fvg ?? plan.fvg;
@@ -1090,12 +1100,13 @@ function formatSensitivity(sensitivity: ScalpingSensitivity) {
 const alertTimeframes: Timeframe[] = ["M1", "M5", "M15", "M30"];
 
 function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { alertOnWatch: boolean; analyses: TimeframeAnalysis[]; price: number; symbol: string }): TradingAlertCandidate | null {
-  const directSignals: Signal[] = ["BUY", "SELL"];
+  const directSignals: Signal[] = ["BUY", "SELL", "BUY SCALP READY", "SELL SCALP READY", "STRONG BUY", "STRONG SELL"];
+  const preSignals: Signal[] = ["PRE-SIGNAL BUY", "PRE-SIGNAL SELL"];
   const watchSignals: Signal[] = ["WATCH BUY", "WATCH SELL"];
   const candidates = alertTimeframes
     .map((timeframe) => analyses.find((analysis) => analysis.timeframe === timeframe))
     .filter((analysis): analysis is TimeframeAnalysis => Boolean(analysis))
-    .filter((analysis) => directSignals.includes(analysis.signal) || analysis.marketScenario.signalTiming === "pre-signal" || (alertOnWatch && watchSignals.includes(analysis.signal)))
+    .filter((analysis) => directSignals.includes(analysis.signal) || preSignals.includes(analysis.signal) || analysis.marketScenario.signalTiming === "pre-signal" || (alertOnWatch && watchSignals.includes(analysis.signal)))
     .sort((a, b) => getAlertSignalPriority(b.signal) - getAlertSignalPriority(a.signal) || b.score - a.score);
   const analysis = candidates[0];
 
@@ -1113,7 +1124,7 @@ function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { a
     Math.round(price * 100),
     Math.round(analysis.score),
   ].join("|");
-  const preSignal = analysis.marketScenario.signalTiming === "pre-signal";
+  const preSignal = preSignals.includes(analysis.signal) || analysis.marketScenario.signalTiming === "pre-signal";
   const reason = preSignal ? analysis.marketScenario.shortExplanation : analysis.waitReason || analysis.summary;
   const historyItem: AlertHistoryItem = {
     id: `${id}|${Date.now()}`,
@@ -1130,13 +1141,17 @@ function getTradingAlertCandidate({ alertOnWatch, analyses, price, symbol }: { a
     historyItem,
     id,
     reason,
-    title: `${preSignal ? "PRE-SIGNAL" : analysis.signal} ${analysis.timeframe} - ${symbol}`,
+    title: `${analysis.signal} ${analysis.timeframe} - ${symbol}`,
   };
 }
 
 function getAlertSignalPriority(signal: Signal) {
-  if (signal === "BUY" || signal === "SELL") {
+  if (signal === "BUY" || signal === "SELL" || signal === "BUY SCALP READY" || signal === "SELL SCALP READY" || signal === "STRONG BUY" || signal === "STRONG SELL") {
     return 2;
+  }
+
+  if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
+    return 1.5;
   }
 
   if (signal === "WATCH BUY" || signal === "WATCH SELL") {

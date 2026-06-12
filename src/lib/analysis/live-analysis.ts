@@ -68,9 +68,12 @@ interface EntryQualityResult {
 interface MomentumBreakoutResult {
   confidence: number;
   direction: Direction;
+  invalidation: string | null;
   lateReason: string | null;
   missing: string[];
+  previousEntryZone: string | null;
   reason: string;
+  watchCondition: string | null;
   state: "none" | "watch" | "confirmed" | "late";
 }
 
@@ -559,11 +562,19 @@ function applyMomentumBreakoutDecision(decision: DecisionResult, momentum: Momen
   }
 
   if (momentum.state === "late") {
+    const lateDetails = [
+      "Signal rate",
+      "Entree trop tardive",
+      "Attendre pullback",
+      momentum.previousEntryZone ? `Zone d'entree precedente: ${momentum.previousEntryZone}` : "Zone d'entree precedente: niveau casse avant impulsion",
+      momentum.lateReason,
+    ].filter(Boolean) as string[];
+
     return {
       confidence: Math.min(Math.max(decision.confidence, momentum.confidence), 54),
-      missingConditions: [momentum.lateReason ?? "Signal trop tardif", "Attendre pullback", "Zone d'entree ratee", ...decision.missingConditions],
+      missingConditions: [...lateDetails, ...decision.missingConditions],
       signal: "WAIT",
-      waitReason: `WAIT: mouvement detecte mais entree tardive. ${momentum.lateReason ?? "Attendre pullback."}`,
+      waitReason: `WAIT: signal rate, entree trop tardive. ${momentum.lateReason ?? "Attendre pullback."}`,
     };
   }
 
@@ -577,11 +588,24 @@ function applyMomentumBreakoutDecision(decision: DecisionResult, momentum: Momen
   }
 
   if (momentum.state === "watch") {
+    const preSignal = momentum.direction === "Bullish" ? "PRE-SIGNAL BUY" : "PRE-SIGNAL SELL";
+    const fallbackCondition = momentum.direction === "Bullish"
+      ? "Attendre retest FVG ou cloture au-dessus du dernier high"
+      : "Attendre retest FVG ou cloture sous le dernier low";
+    const fallbackInvalidation = momentum.direction === "Bullish"
+      ? "Invalidation sous le dernier micro-low"
+      : "Invalidation au-dessus du dernier micro-high";
+
     return {
       confidence: Math.max(decision.confidence, momentum.confidence),
-      missingConditions: momentum.missing.length ? momentum.missing : ["Micro pullback ou cloture de confirmation"],
-      signal: momentum.direction === "Bullish" ? "WATCH BUY" : "WATCH SELL",
-      waitReason: `${momentum.direction === "Bullish" ? "WATCH BUY" : "WATCH SELL"}: mouvement fort detecte. ${momentum.reason}`,
+      missingConditions: [
+        momentum.watchCondition ?? fallbackCondition,
+        momentum.invalidation ?? fallbackInvalidation,
+        "Pre-signal seulement, attendre confirmation",
+        ...momentum.missing,
+      ],
+      signal: preSignal,
+      waitReason: `${preSignal} detecte: ${momentum.reason} ${momentum.watchCondition ?? fallbackCondition}. ${momentum.invalidation ?? fallbackInvalidation}. Pre-signal seulement, attendre confirmation.`,
     };
   }
 
@@ -634,6 +658,7 @@ function evaluateMomentumBreakoutContinuation({
   }).length;
   const priorHigh = Math.max(...prior.map((candle) => candle.high));
   const priorLow = Math.min(...prior.map((candle) => candle.low));
+  const brokenLevel = bullish ? priorHigh : priorLow;
   const clearBreak = bullish ? last.close > priorHigh + atr * 0.08 : last.close < priorLow - atr * 0.08;
   const m1MicroBos = detectMicroBreakout(candleMap.M1, setupDirection);
   const m5MicroBos = detectMicroBreakout(candleMap.M5, setupDirection);
@@ -642,7 +667,7 @@ function evaluateMomentumBreakoutContinuation({
   const usefulZoneBreak = bullish ? last.close > Math.max(analysis.resistance, priorHigh) : last.close < Math.min(analysis.support || priorLow, priorLow);
   const notNearBarrier = !isNearMajorBarrier({ analysis, candleMap, direction: setupDirection, price, atr });
   const late = isMomentumMoveLate({ analysis, candles, direction: setupDirection, marketScenario, price, atr });
-  const microPullback = hasMicroPullbackOrRetest(candles, setupDirection, atr, bullish ? priorHigh : priorLow);
+  const microPullback = hasMicroPullbackOrRetest(candles, setupDirection, atr, brokenLevel);
   const rrOk = riskReward >= 1;
   const closeConfirmed = bullish ? last.close > last.open && last.close > priorHigh : last.close < last.open && last.close < priorLow;
   const missing = [
@@ -670,13 +695,18 @@ function evaluateMomentumBreakoutContinuation({
   );
 
   if (late) {
+    const previousEntryZone = `${round(brokenLevel - atr * 0.35)} - ${round(brokenLevel + atr * 0.35)}`;
+
     return {
       confidence,
       direction: setupDirection,
-      lateReason: "Mouvement detecte mais entree tardive. Attendre pullback.",
+      invalidation: null,
+      lateReason: `Mouvement detecte mais entree tardive. Attendre pullback. Zone d'entree precedente: ${previousEntryZone}.`,
       missing,
+      previousEntryZone,
       reason: "Impulsion deja avancee vers la prochaine liquidite.",
       state: "late",
+      watchCondition: null,
     };
   }
 
@@ -684,37 +714,52 @@ function evaluateMomentumBreakoutContinuation({
     return {
       confidence,
       direction: setupDirection,
+      invalidation: null,
       lateReason: null,
       missing,
+      previousEntryZone: null,
       reason: missing[0] ?? "Momentum breakout pas assez confirme.",
       state: "none",
+      watchCondition: null,
     };
   }
 
   if (clearBreak && strongBodies >= 2 && (m1MicroBos || m5MicroBos || analysis.structure === "BOS" || analysis.structure === "CHoCH") && volatilityRising) {
     const reason = `${bullish ? "Cassure high" : "Cassure low"} + corps forts + micro-BOS + volatilite en hausse.`;
+    const watchCondition = bullish
+      ? "Attendre retest FVG ou cloture au-dessus du dernier high"
+      : "Attendre retest FVG ou cloture sous le dernier low";
+    const invalidation = bullish
+      ? `Invalidation sous le dernier micro-low ${round(Math.min(previous.low, last.low))}`
+      : `Invalidation au-dessus du dernier micro-high ${round(Math.max(previous.high, last.high))}`;
 
     if (closeConfirmed && microPullback && confidence >= 68) {
-      return { confidence, direction: setupDirection, lateReason: null, missing: [], reason, state: "confirmed" };
+      return { confidence, direction: setupDirection, invalidation, lateReason: null, missing: [], previousEntryZone: null, reason, state: "confirmed", watchCondition: null };
     }
 
     return {
       confidence,
       direction: setupDirection,
+      invalidation,
       lateReason: null,
       missing: microPullback ? ["Cloture finale dans le sens du mouvement"] : ["Petit pullback ou micro-retest accepte"],
+      previousEntryZone: `${round(brokenLevel - atr * 0.35)} - ${round(brokenLevel + atr * 0.35)}`,
       reason,
       state: "watch",
+      watchCondition,
     };
   }
 
   return {
     confidence,
     direction: setupDirection,
+    invalidation: null,
     lateReason: null,
     missing,
+    previousEntryZone: null,
     reason: missing[0] ?? "Momentum breakout pas assez confirme.",
     state: "none",
+    watchCondition: null,
   };
 }
 
@@ -722,10 +767,13 @@ function createNoMomentumBreakout(reason: string, direction: Direction): Momentu
   return {
     confidence: 0,
     direction,
+    invalidation: null,
     lateReason: null,
     missing: [reason],
+    previousEntryZone: null,
     reason,
     state: "none",
+    watchCondition: null,
   };
 }
 
@@ -903,11 +951,11 @@ function createNeutralCounterTrendAnalysis(enabled: boolean): CounterTrendAnalys
 }
 
 function getSignalDirection(signal: Signal): Direction | null {
-  if (signal === "BUY" || signal === "STRONG BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
+  if (signal === "BUY" || signal === "STRONG BUY" || signal === "BUY SCALP READY" || signal === "PRE-SIGNAL BUY" || signal === "WATCH BUY") {
     return "Bullish";
   }
 
-  if (signal === "SELL" || signal === "STRONG SELL" || signal === "SELL SCALP READY" || signal === "WATCH SELL") {
+  if (signal === "SELL" || signal === "STRONG SELL" || signal === "SELL SCALP READY" || signal === "PRE-SIGNAL SELL" || signal === "WATCH SELL") {
     return "Bearish";
   }
 
@@ -1413,6 +1461,26 @@ function createWaitingQuickAnalysis({ entryMode, missing, price, reason }: { ent
 
 function evaluateQuickIntradayDecision(quick: NonNullable<TradePlan["quickAnalysis"]>): DecisionResult {
   if (quick.signal === "WAIT") {
+    const directionalPreSignal = quick.status === "Attendre confirmation" && quick.h1Direction !== "Neutral" && quick.confidence >= 45;
+
+    if (directionalPreSignal) {
+      const bullish = quick.h1Direction === "Bullish";
+      const signal: Signal = bullish ? "PRE-SIGNAL BUY" : "PRE-SIGNAL SELL";
+      const condition = bullish
+        ? "Attendre retest FVG ou cloture au-dessus du dernier high"
+        : "Attendre retest FVG ou cloture sous le dernier low";
+      const invalidation = bullish
+        ? `Invalidation sous ${round(quick.stopLoss || quick.entryZone.low)}`
+        : `Invalidation au-dessus de ${round(quick.stopLoss || quick.entryZone.high)}`;
+
+      return {
+        confidence: Math.max(50, Math.min(74, quick.confidence)),
+        missingConditions: [condition, invalidation, "Pre-signal seulement, attendre confirmation", ...quick.missing],
+        signal,
+        waitReason: `${signal} detecte: ${quick.reasons[0] ?? "contexte H1 et timing court terme en preparation"}. ${condition}. ${invalidation}. Pre-signal seulement, attendre confirmation.`,
+      };
+    }
+
     return {
       confidence: quick.confidence,
       missingConditions: quick.missing,
@@ -1582,6 +1650,9 @@ function evaluateQuickSignal({
     marketScenario.phase === "high-risk" ? "Phase risque eleve" : null,
     direction === "Neutral" ? "Clear current trend direction" : null,
     scenarioConfirmations >= 2 ? null : "Au moins 2 confirmations rapides",
+    marketScenario.entryState === "confirmed-entry" ? null : marketScenario.entryState === "setup-forming" ? "WAIT : pas de retest" : "WAIT : pas de zone d'entree confirmee",
+    marketScenario.signalTiming === "confirmed" || marketScenario.signalTiming === "early-continuation" ? null : "WAIT : pas de cloture confirmee",
+    riskReward >= 1 ? null : "WAIT : RR insuffisant",
     volatilityOk ? null : "Volatility below danger zone",
     spreadOk ? null : "Spread safe",
     blockedByLevel ? (direction === "Bullish" ? "Do not buy near resistance after extended rise" : "Do not sell near support after extended drop") : null,
@@ -1593,11 +1664,15 @@ function evaluateQuickSignal({
   }
 
   if (marketScenario.signalTiming === "late") {
+    const previousZone = marketScenario.primaryBias === "Buy"
+      ? `Zone d'entree precedente: ${round(analysis.support)} - ${round(analysis.support + analysis.atr)}`
+      : `Zone d'entree precedente: ${round(analysis.resistance - analysis.atr)} - ${round(analysis.resistance)}`;
+
     return {
       confidence: Math.min(Math.max(marketScenario.confidence, confidence), 54),
-      missingConditions: [marketScenario.lateReason ?? "Signal tardif", ...missingConditions],
+      missingConditions: ["Signal rate", "Entree trop tardive", "Attendre pullback", previousZone, marketScenario.lateReason ?? "Signal tardif", ...missingConditions],
       signal: "WAIT",
-      waitReason: "Signal detecte mais trop tard, entree deconseillee.",
+      waitReason: `WAIT: Signal rate. Entree trop tardive, attendre pullback. ${previousZone}.`,
     };
   }
 
@@ -1615,11 +1690,20 @@ function evaluateQuickSignal({
   }
 
   if (marketScenario.signalTiming === "pre-signal" && marketScenario.primaryBias !== "Neutral") {
+    const bullish = marketScenario.primaryBias === "Buy";
+    const signal: Signal = bullish ? "PRE-SIGNAL BUY" : "PRE-SIGNAL SELL";
+    const condition = bullish
+      ? "Attendre retest FVG ou cloture au-dessus du dernier high"
+      : "Attendre retest FVG ou cloture sous le dernier low";
+    const invalidation = bullish
+      ? `Invalidation sous ${round(analysis.support)}`
+      : `Invalidation au-dessus de ${round(analysis.resistance)}`;
+
     return {
       confidence: Math.max(50, Math.min(74, marketScenario.confidence || confidence)),
-      missingConditions: [marketScenario.requiredConfirmation, ...missingConditions],
-      signal: marketScenario.primaryBias === "Buy" ? "WATCH BUY" : "WATCH SELL",
-      waitReason: `Pre-signal ${marketScenario.primaryBias}: pression detectee, attendre cloture/cassure claire avant entree.`,
+      missingConditions: [condition, invalidation, "Pre-signal seulement, attendre confirmation", marketScenario.requiredConfirmation, ...missingConditions],
+      signal,
+      waitReason: `${signal} detecte: ${marketScenario.shortExplanation}. ${condition}. ${invalidation}. Pre-signal seulement, attendre confirmation.`,
     };
   }
 
@@ -2664,7 +2748,7 @@ function applyOrderBlockDecisionGuard({ analysis, decision, direction }: { analy
 }
 
 function applyLiquidityDecisionGuard({ analysis, decision }: { analysis: TechnicalAnalysis; decision: Signal }) {
-  if (decision === "WAIT") {
+  if (decision === "WAIT" || !isActionableSignal(decision)) {
     return decision;
   }
 
@@ -2921,6 +3005,10 @@ function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>, mode: SignalMo
 
 function summarizeDecision(decision: Signal, direction: Direction, mode: SignalMode, analysisDepth: AnalysisDepth) {
   if (analysisDepth === "quick") {
+    if (decision === "PRE-SIGNAL BUY" || decision === "PRE-SIGNAL SELL") {
+      return `Analyse rapide: ${decision}, pression detectee mais entree non confirmee.`;
+    }
+
     if (decision === "BUY" || decision === "SELL") {
       return `Analyse rapide: ${decision} selon tendance, MTF, momentum, volatilite et spread.`;
     }
@@ -2938,6 +3026,10 @@ function summarizeDecision(decision: Signal, direction: Direction, mode: SignalM
 
   if (decision === "BUY" || decision === "SELL") {
     return `Setup ${direction.toLowerCase()} confirme par le moteur de categorie.`;
+  }
+
+  if (decision === "PRE-SIGNAL BUY" || decision === "PRE-SIGNAL SELL") {
+    return `Pre-signal ${direction.toLowerCase()}: pression precoce, attendre confirmation avant entree.`;
   }
 
   if (decision === "WATCH BUY" || decision === "WATCH SELL") {

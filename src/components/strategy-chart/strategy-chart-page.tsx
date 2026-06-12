@@ -20,6 +20,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
   const [selectedSymbol, setSelectedSymbol] = useState(normalizeSymbol(initialSymbol) || "XAUUSD");
   const [activeTimeframe, setActiveTimeframe] = useState<Timeframe>("M5");
   const [entryMode, setEntryMode] = useState<QuickEntryMode>("mixed");
+  const [allowPremiumCounterTrend, setAllowPremiumCounterTrend] = useState(false);
   const [showReasonPanel, setShowReasonPanel] = useState(true);
   const symbolProfile = useMemo(() => getSymbolProfile(selectedSymbol), [selectedSymbol]);
   const live = useLiveXauusd(symbolProfile.symbol);
@@ -28,6 +29,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
   const analyses = useMemo(
     () =>
       buildLiveTimeframeAnalyses({
+        allowPremiumCounterTrend,
         analysisDepth: "quick",
         analysisSource: live.source,
         candleMap: live.candleMap,
@@ -39,11 +41,12 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         spread,
         symbolProfile,
       }),
-    [activeTimeframe, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
+    [activeTimeframe, allowPremiumCounterTrend, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
   );
   const plan = useMemo(
     () =>
       buildLiveTradePlan({
+        allowPremiumCounterTrend,
         analysisDepth: "quick",
         analysisSource: live.source,
         candleMap: live.candleMap,
@@ -57,7 +60,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         spread,
         symbolProfile,
       }),
-    [activeTimeframe, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
+    [activeTimeframe, allowPremiumCounterTrend, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
   );
   const activeAnalysis = analyses.find((analysis) => analysis.timeframe === activeTimeframe);
   const quick = plan.quickAnalysis;
@@ -108,8 +111,15 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
               onChange={(value) => setEntryMode(value as QuickEntryMode)}
             />
           </div>
+          <label className="mt-3 flex cursor-pointer items-start gap-2 rounded-md border border-rose-300/20 bg-rose-300/10 p-2 text-xs leading-5 text-rose-50">
+            <input className="mt-1 size-4 accent-rose-300" type="checkbox" checked={allowPremiumCounterTrend} onChange={(event) => setAllowPremiumCounterTrend(event.target.checked)} />
+            <span>
+              <span className="block font-bold text-white">Autoriser les trades contre-tendance premium</span>
+              Tres strict: zone HTF majeure + reaction forte + confirmation Smart Money + RR &gt;= 1 + score 85%.
+            </span>
+          </label>
         </div>
-        <StrategyResultCard quick={quick} symbolProfile={symbolProfile} />
+        <StrategyResultCard plan={plan} symbolProfile={symbolProfile} />
       </section>
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -149,7 +159,8 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
   );
 }
 
-function StrategyResultCard({ quick, symbolProfile }: { quick: ReturnType<typeof buildLiveTradePlan>["quickAnalysis"]; symbolProfile: SymbolProfile }) {
+function StrategyResultCard({ plan, symbolProfile }: { plan: ReturnType<typeof buildLiveTradePlan>; symbolProfile: SymbolProfile }) {
+  const quick = plan.quickAnalysis;
   const tone = quick?.signal === "BUY" ? "border-emerald-300/30 bg-emerald-300/10" : quick?.signal === "SELL" ? "border-rose-300/30 bg-rose-300/10" : "border-amber-300/30 bg-amber-300/10";
 
   return (
@@ -172,7 +183,13 @@ function StrategyResultCard({ quick, symbolProfile }: { quick: ReturnType<typeof
         <Metric label="Take Profit" value={formatPrice(quick?.takeProfit)} />
         <Metric label="Risk Reward" value={quick?.riskReward ? `1:${quick.riskReward.toFixed(2)}` : "--"} />
         <Metric label="Score" value={`${quick?.confidence ?? 0}%`} />
+        <Metric label="Contre-tendance" value={plan.counterTrend.active ? plan.counterTrend.allowed ? "Premium confirmee" : "Bloquee" : "Non"} />
       </div>
+      {plan.counterTrend.active ? (
+        <p className={`mt-3 rounded border px-3 py-2 text-xs font-semibold leading-5 ${plan.counterTrend.allowed ? "border-amber-300/25 bg-amber-300/10 text-amber-100" : "border-rose-300/25 bg-rose-300/10 text-rose-100"}`}>
+          {plan.counterTrend.warning}
+        </p>
+      ) : null}
     </section>
   );
 }

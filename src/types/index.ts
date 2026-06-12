@@ -26,6 +26,18 @@ export type QuickEntryMode = "safe" | "fast" | "mixed";
 
 export type ScalpingSensitivity = "safe" | "balanced" | "aggressive";
 
+export interface CounterTrendAnalysis {
+  active: boolean;
+  allowed: boolean;
+  enabled: boolean;
+  score: number;
+  threshold: number;
+  status: "trend-following" | "blocked" | "premium-confirmed";
+  warning: string | null;
+  reasons: string[];
+  missing: string[];
+}
+
 export type OrbDuration = 5 | 15 | 30;
 
 export type MovingAverageType = "EMA" | "SMA";
@@ -329,6 +341,7 @@ export interface TimeframeAnalysis {
   trendFilter: TrendFilterAnalysis | null;
   marketScenario: MarketScenario;
   quickAnalysis: QuickAnalysisResult | null;
+  counterTrend: CounterTrendAnalysis;
   riskReward: number;
   summary: string;
 }
@@ -376,6 +389,7 @@ export interface TradePlan {
   trendFilter: TrendFilterAnalysis | null;
   marketScenario: MarketScenario;
   quickAnalysis: QuickAnalysisResult | null;
+  counterTrend: CounterTrendAnalysis;
   accountRisk: AccountRiskSummary;
 }
 

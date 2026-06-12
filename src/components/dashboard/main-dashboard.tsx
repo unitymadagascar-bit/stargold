@@ -44,6 +44,7 @@ export function MainDashboard() {
   const [signalMode, setSignalMode] = useState<SignalMode>("conservative");
   const [analysisDepth, setAnalysisDepth] = useState<AnalysisDepth>("deep");
   const [quickEntryMode, setQuickEntryMode] = useState<QuickEntryMode>("mixed");
+  const [allowPremiumCounterTrend, setAllowPremiumCounterTrend] = useState(false);
   const [scalpingSensitivity, setScalpingSensitivity] = useState<ScalpingSensitivity>("balanced");
   const [orbDuration, setOrbDuration] = useState<OrbDuration>(30);
   const [orbRequireRetest, setOrbRequireRetest] = useState(false);
@@ -63,12 +64,12 @@ export function MainDashboard() {
   const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
   const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
-    [analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
+    [allowPremiumCounterTrend, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, allowPremiumCounterTrend, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const latestPrice = getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
@@ -197,11 +198,13 @@ export function MainDashboard() {
             onMovingAverageTypeChange={setMovingAverageType}
             onOrbDurationChange={setOrbDuration}
             onOrbRequireRetestChange={setOrbRequireRetest}
+            onPremiumCounterTrendChange={setAllowPremiumCounterTrend}
             onQuickEntryModeChange={setQuickEntryMode}
             onSensitivityChange={setScalpingSensitivity}
             orbDuration={orbDuration}
             orbRequireRetest={orbRequireRetest}
             plan={plan}
+            premiumCounterTrend={allowPremiumCounterTrend}
             quickEntryMode={quickEntryMode}
             sensitivity={scalpingSensitivity}
           />
@@ -380,6 +383,7 @@ function QuickAnalysisResultPanel({ plan }: { plan: TradePlan }) {
         <SetupMetric label="RSI" value={quick.confirmations.rsi ? "Compatible" : "Non confirme"} />
         <SetupMetric label="Price Action" value={quick.confirmations.priceAction ? "Validee" : "A confirmer"} />
         <SetupMetric label="BOS / ChoCH" value={quick.confirmations.bosChoch ? "Detecte" : "A confirmer"} />
+        <SetupMetric label="Contre-tendance" value={plan.counterTrend.active ? plan.counterTrend.allowed ? "Premium confirmee" : "Bloquee" : "Non"} />
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
@@ -753,6 +757,13 @@ function SetupPanel({ activeAnalysis, activeTimeframe, candleCount, plan }: { ac
         <SignalBadge signal={activeAnalysis?.signal ?? "WAIT"} />
       </div>
       <p className="mt-3 text-xs leading-5 text-slate-300">{plan.summary}</p>
+      {plan.counterTrend.active ? (
+        <div className={`mt-3 rounded-md border p-2.5 ${plan.counterTrend.allowed ? "border-amber-300/25 bg-amber-300/10" : "border-rose-300/25 bg-rose-300/10"}`}>
+          <p className="text-sm font-black text-white">{plan.counterTrend.allowed ? "CONTRE-TENDANCE CONFIRMEE" : "Contre-tendance bloquee"}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-200">{plan.counterTrend.warning}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">Score {plan.counterTrend.score}/{plan.counterTrend.threshold}</p>
+        </div>
+      ) : null}
       <div className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 p-2.5">
         <p className="text-sm font-semibold text-sky-100">{activeAnalysis?.waitReason ?? plan.waitReason}</p>
         <p className="mt-1 text-xs leading-5 text-slate-300">
@@ -789,11 +800,13 @@ function SignalModePanel({
   onMovingAverageTypeChange,
   onOrbDurationChange,
   onOrbRequireRetestChange,
+  onPremiumCounterTrendChange,
   onQuickEntryModeChange,
   onSensitivityChange,
   orbDuration,
   orbRequireRetest,
   plan,
+  premiumCounterTrend,
   quickEntryMode,
   sensitivity,
 }: {
@@ -808,11 +821,13 @@ function SignalModePanel({
   onMovingAverageTypeChange: (type: MovingAverageType) => void;
   onOrbDurationChange: (duration: OrbDuration) => void;
   onOrbRequireRetestChange: (enabled: boolean) => void;
+  onPremiumCounterTrendChange: (enabled: boolean) => void;
   onQuickEntryModeChange: (mode: QuickEntryMode) => void;
   onSensitivityChange: (sensitivity: ScalpingSensitivity) => void;
   orbDuration: OrbDuration;
   orbRequireRetest: boolean;
   plan: TradePlan;
+  premiumCounterTrend: boolean;
   quickEntryMode: QuickEntryMode;
   sensitivity: ScalpingSensitivity;
 }) {
@@ -846,6 +861,13 @@ function SignalModePanel({
           <SensitivityButton active={quickEntryMode === "mixed"} label="Mixte" onClick={() => onQuickEntryModeChange("mixed")} />
         </div>
       </div>
+      <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-md border border-rose-300/20 bg-rose-300/10 p-2 text-xs leading-5 text-rose-50">
+        <input className="mt-1 size-4 accent-rose-300" type="checkbox" checked={premiumCounterTrend} onChange={(event) => onPremiumCounterTrendChange(event.target.checked)} />
+        <span>
+          <span className="block font-bold text-white">Autoriser les trades contre-tendance premium</span>
+          Desactive par defaut. Seuil strict 85% avec zone HTF, sweep/rejet, ChoCH ou FVG/retest et RR valide.
+        </span>
+      </label>
       <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
         <SetupMetric label="Mode actif" value={mode === "scalping" ? "Scalping" : "Conservative"} />
         <SetupMetric label="Analyse" value={analysisDepth === "quick" ? "Rapide" : "Approfondie"} />
@@ -853,6 +875,7 @@ function SignalModePanel({
         <SetupMetric label="Seuils" value={analysisDepth === "quick" ? "BUY/SELL 58" : "WATCH 50 / READY 58"} />
         <SetupMetric label="Priorite rapide" value={quickEntryMode === "safe" ? "H1 -> M15" : quickEntryMode === "fast" ? "H1 -> M5" : "H1 -> M15 -> M5"} />
         <SetupMetric label="Sensibilite" value={formatSensitivity(sensitivity)} />
+        <SetupMetric label="Contre-tendance" value={premiumCounterTrend ? "Premium strict actif" : "Bloquee"} />
         <SetupMetric label="ORB status" value={orb?.status ?? "WAIT"} />
         <SetupMetric label="FVG" value={fvg ? `${fvg.direction} ${fvg.score}/100` : "attente"} />
         <SetupMetric label="MA bias" value={trendFilter ? `${trendFilter.type}${trendFilter.period} ${trendFilter.bias}` : `${movingAverageType}${movingAveragePeriod}`} />

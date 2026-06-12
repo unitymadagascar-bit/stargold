@@ -62,6 +62,22 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
         </div>
       ) : null}
 
+      {plan.counterTrend.active ? (
+        <div className={`border-b px-4 py-3 ${plan.counterTrend.allowed ? "border-amber-300/25 bg-amber-300/10" : "border-rose-300/20 bg-rose-300/10"}`}>
+          <p className={`text-sm font-black uppercase tracking-[0.12em] ${plan.counterTrend.allowed ? "text-amber-100" : "text-rose-100"}`}>
+            {plan.counterTrend.allowed ? "CONTRE-TENDANCE CONFIRMEE" : "CONTRE-TENDANCE BLOQUEE"}
+          </p>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-200">
+            {plan.counterTrend.allowed
+              ? "Risque plus eleve. Entree seulement apres confirmation. Ne pas anticiper."
+              : "Priorite absolue au sens H1. Active seulement si setup premium complet: zone HTF, reaction, SMC, RR et score 85%."}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">
+            Score contre-tendance {plan.counterTrend.score}/{plan.counterTrend.threshold}. {plan.counterTrend.allowed ? plan.counterTrend.reasons.join(" / ") : plan.counterTrend.missing.join(" / ")}
+          </p>
+        </div>
+      ) : null}
+
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <DecisionTile label="Bias directionnel" value={final.directionalBias} tone={final.biasTone} />

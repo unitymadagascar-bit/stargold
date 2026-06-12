@@ -1,5 +1,6 @@
 import type {
   Candle,
+  CounterTrendAnalysis,
   Direction,
   FundamentalContext,
   MacroContext,
@@ -102,6 +103,7 @@ export function getLatestPrice(candleMap: Record<Timeframe, Candle[]>): number {
 }
 
 export function buildLiveTimeframeAnalyses({
+  allowPremiumCounterTrend = false,
   analysisDepth = "deep",
   analysisSource = null,
   candleMap,
@@ -118,6 +120,7 @@ export function buildLiveTimeframeAnalyses({
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
+  allowPremiumCounterTrend?: boolean;
   analysisDepth?: AnalysisDepth;
   analysisSource?: string | null;
   candleMap: Record<Timeframe, Candle[]>;
@@ -166,7 +169,7 @@ export function buildLiveTimeframeAnalyses({
     const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
     const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
     const quickAnalysis = analysisDepth === "quick" ? buildQuickIntradayAnalysis({ candleMap, entryMode: quickEntryMode, newsRisk: redNewsNearby, price, spread, symbolProfile }) : null;
-    const decision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
+    const rawDecision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
       analysis,
       candleMap,
       candles,
@@ -198,6 +201,8 @@ export function buildLiveTimeframeAnalyses({
       marketScenario,
       riskReward,
     });
+    const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: rawDecision, direction, marketScenario, riskReward });
+    const decision = applyCounterTrendGuard(rawDecision, counterTrend);
 
     return {
       timeframe,
@@ -225,6 +230,7 @@ export function buildLiveTimeframeAnalyses({
       trendFilter: analysis.trendFilter,
       marketScenario,
       quickAnalysis,
+      counterTrend,
       riskReward: Number(riskReward.toFixed(2)),
       summary: `${decision.waitReason}. ${decision.missingConditions.length ? `Missing: ${decision.missingConditions.join(", ")}.` : "Conditions validees."}`,
     };
@@ -232,6 +238,7 @@ export function buildLiveTimeframeAnalyses({
 }
 
 export function buildLiveTradePlan({
+  allowPremiumCounterTrend = false,
   analysisDepth = "deep",
   analysisSource = null,
   candleMap,
@@ -250,6 +257,7 @@ export function buildLiveTradePlan({
   spread = null,
   symbolProfile = getSymbolProfile("XAUUSD"),
 }: {
+  allowPremiumCounterTrend?: boolean;
   analysisDepth?: AnalysisDepth;
   analysisSource?: string | null;
   candleMap: Record<Timeframe, Candle[]>;
@@ -316,6 +324,7 @@ export function buildLiveTradePlan({
       trendFilter: null,
       marketScenario: createEmptyMarketScenario(),
       quickAnalysis: null,
+      counterTrend: createNeutralCounterTrendAnalysis(false),
       accountRisk: buildAccountRiskSummary(normalizedRiskSettings, 0),
     };
   }
@@ -335,7 +344,7 @@ export function buildLiveTradePlan({
   const marketScenario = buildMarketScenario({ analysis, candleMap, candles, direction, newsRisk: redNewsNearby, riskReward, spread, symbolProfile });
   const scoring = calculateFundamentalDecisionScore({ analysis, direction, fundamental, riskReward });
   const quickAnalysis = analysisDepth === "quick" ? buildQuickIntradayAnalysis({ candleMap, entryMode: quickEntryMode, newsRisk: redNewsNearby, price, spread, symbolProfile }) : null;
-  const decision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
+  const rawDecision = analysisDepth === "quick" && quickAnalysis ? evaluateQuickIntradayDecision(quickAnalysis) : analysisDepth === "quick" ? evaluateQuickSignal({
     analysis,
     candleMap,
     candles,
@@ -367,6 +376,11 @@ export function buildLiveTradePlan({
     marketScenario,
     riskReward,
   });
+  const rawPlanDirection = analysisDepth === "quick"
+    ? quickAnalysis?.signal === "BUY" ? "Bullish" : quickAnalysis?.signal === "SELL" ? "Bearish" : quickAnalysis?.h1Direction ?? direction
+    : analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb.direction : direction;
+  const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: rawDecision, direction: rawPlanDirection, marketScenario, riskReward });
+  const decision = applyCounterTrendGuard(rawDecision, counterTrend);
   const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
   const fvgPlan = analysis.fvgAnalysis;
   const quickDirection = quickAnalysis?.signal === "BUY" ? "Bullish" : quickAnalysis?.signal === "SELL" ? "Bearish" : quickAnalysis?.h1Direction ?? direction;
@@ -425,6 +439,7 @@ export function buildLiveTradePlan({
     trendFilter: analysis.trendFilter,
     marketScenario,
     quickAnalysis,
+    counterTrend,
     accountRisk,
   };
 }
@@ -508,6 +523,217 @@ function applyAccountRiskGuard(decision: DecisionResult, accountRisk: AccountRis
     signal: "WAIT",
     waitReason: `WAIT: ${riskWarning}`,
   };
+}
+
+function applyCounterTrendGuard(decision: DecisionResult, counterTrend: CounterTrendAnalysis): DecisionResult {
+  if (!counterTrend.active || counterTrend.allowed || !isActionableSignal(decision.signal)) {
+    return decision;
+  }
+
+  return {
+    confidence: Math.min(decision.confidence, 49),
+    missingConditions: [...counterTrend.missing, ...decision.missingConditions],
+    signal: "WAIT",
+    waitReason: counterTrend.enabled
+      ? "WAIT: contre-tendance non premium. Attendre sweep, reaction forte, ChoCH, FVG/retest et RR valide."
+      : "WAIT: contre-tendance desactivee. Priorite aux trades dans le sens H1.",
+  };
+}
+
+function evaluateCounterTrendPremium({
+  allowPremiumCounterTrend,
+  analysis,
+  candleMap,
+  decision,
+  direction,
+  marketScenario,
+  riskReward,
+}: {
+  allowPremiumCounterTrend: boolean;
+  analysis: TechnicalAnalysis;
+  candleMap: Record<Timeframe, Candle[]>;
+  decision: DecisionResult;
+  direction: Direction;
+  marketScenario: MarketScenario;
+  riskReward: number;
+}): CounterTrendAnalysis {
+  const signalDirection = getSignalDirection(decision.signal) ?? direction;
+  const h1Analysis = candleMap.H1.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.H1) : null;
+  const h1Direction = h1Analysis ? inferDirection(h1Analysis) : "Neutral";
+
+  if (!isActionableSignal(decision.signal) || signalDirection === "Neutral" || h1Direction === "Neutral" || signalDirection === h1Direction) {
+    return createNeutralCounterTrendAnalysis(allowPremiumCounterTrend);
+  }
+
+  const h4Analysis = candleMap.H4.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.H4) : null;
+  const d1Analysis = candleMap.D1.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.D1) : null;
+  const lowerTimeframeCandles = [...candleMap.M1.slice(-12), ...candleMap.M5.slice(-8), ...candleMap.M15.slice(-5)];
+  const lowerTfReaction = detectCounterTrendReaction(lowerTimeframeCandles, signalDirection, analysis.atr);
+  const htfZone = detectCounterTrendHtfZone({ analysis, candleMap, direction: signalDirection, h1Analysis, h4Analysis, d1Analysis });
+  const smc = detectCounterTrendSmc({ analysis, candleMap, direction: signalDirection });
+  const rrOk = riskReward >= 1;
+  const rrStrong = riskReward >= 1.5;
+  const confidenceOk = decision.confidence >= 85 || marketScenario.confidence >= 85;
+  const reasons = [
+    htfZone.ok ? `Zone HTF majeure: ${htfZone.reason}` : null,
+    lowerTfReaction.ok ? `Reaction forte: ${lowerTfReaction.reason}` : null,
+    smc.ok ? `Confirmation Smart Money: ${smc.reason}` : null,
+    rrOk ? `Risk Reward valide 1:${riskReward.toFixed(2)}` : null,
+    confidenceOk ? `Score strict valide (${Math.max(decision.confidence, marketScenario.confidence)}/100)` : null,
+  ].filter(Boolean) as string[];
+  const missing = [
+    allowPremiumCounterTrend ? null : "Activer Autoriser les trades contre-tendance premium",
+    htfZone.ok ? null : "Zone majeure HTF obligatoire",
+    lowerTfReaction.ok ? null : "Reaction claire: rejet fort, engulfing ou ChoCH M1/M5/M15",
+    smc.ok ? null : "Confirmation SMC: sweep + FVG/retest/OB",
+    rrOk ? null : "Risk Reward minimum 1:1",
+    confidenceOk ? null : "Score contre-tendance minimum 85%",
+  ].filter(Boolean) as string[];
+  const score = clamp(
+    (htfZone.ok ? 24 : 0) +
+      (lowerTfReaction.ok ? 24 : 0) +
+      (smc.ok ? 22 : 0) +
+      (rrStrong ? 15 : rrOk ? 10 : 0) +
+      (confidenceOk ? 15 : 0),
+    100,
+  );
+  const allowed = allowPremiumCounterTrend && htfZone.ok && lowerTfReaction.ok && smc.ok && rrOk && confidenceOk && score >= 85;
+
+  return {
+    active: true,
+    allowed,
+    enabled: allowPremiumCounterTrend,
+    missing,
+    reasons,
+    score,
+    status: allowed ? "premium-confirmed" : "blocked",
+    threshold: 85,
+    warning: allowed
+      ? "CONTRE-TENDANCE CONFIRMEE. Risque plus eleve: entree seulement apres confirmation, ne pas anticiper."
+      : "Contre-tendance bloquee. Ne pas anticiper: il manque une zone HTF, reaction, SMC, RR ou score premium.",
+  };
+}
+
+function createNeutralCounterTrendAnalysis(enabled: boolean): CounterTrendAnalysis {
+  return {
+    active: false,
+    allowed: false,
+    enabled,
+    missing: [],
+    reasons: ["Signal dans le sens de la tendance principale ou aucun signal actionable."],
+    score: 0,
+    status: "trend-following",
+    threshold: 85,
+    warning: null,
+  };
+}
+
+function getSignalDirection(signal: Signal): Direction | null {
+  if (signal === "BUY" || signal === "STRONG BUY" || signal === "BUY SCALP READY" || signal === "WATCH BUY") {
+    return "Bullish";
+  }
+
+  if (signal === "SELL" || signal === "STRONG SELL" || signal === "SELL SCALP READY" || signal === "WATCH SELL") {
+    return "Bearish";
+  }
+
+  return null;
+}
+
+function detectCounterTrendHtfZone({
+  analysis,
+  candleMap,
+  direction,
+  d1Analysis,
+  h1Analysis,
+  h4Analysis,
+}: {
+  analysis: TechnicalAnalysis;
+  candleMap: Record<Timeframe, Candle[]>;
+  direction: Direction;
+  d1Analysis: TechnicalAnalysis | null;
+  h1Analysis: TechnicalAnalysis | null;
+  h4Analysis: TechnicalAnalysis | null;
+}) {
+  const price = candleMap.M5.at(-1)?.close ?? candleMap.M15.at(-1)?.close ?? candleMap.H1.at(-1)?.close ?? 0;
+  const atr = Math.max(analysis.atr, price * 0.0008, 0.01);
+  const analyses = [h1Analysis, h4Analysis, d1Analysis].filter(Boolean) as TechnicalAnalysis[];
+  const nearMajorSupport = direction === "Bullish" && analyses.some((item) => Math.abs(price - item.support) <= atr * 1.5 || price <= item.support + atr * 1.5);
+  const nearMajorResistance = direction === "Bearish" && analyses.some((item) => Math.abs(price - item.resistance) <= atr * 1.5 || price >= item.resistance - atr * 1.5);
+  const nearOb = analyses.some((item) => item.orderBlock && price >= item.orderBlock.low - atr && price <= item.orderBlock.high + atr);
+  const nearSessionExtreme = isNearSessionExtreme(candleMap, direction, price, atr);
+  const liquidityZone = direction === "Bullish"
+    ? analysis.liquidity.sellSideZones.some((zone) => Math.abs(price - zone.price) <= atr * 1.5)
+    : analysis.liquidity.buySideZones.some((zone) => Math.abs(price - zone.price) <= atr * 1.5);
+
+  if (nearOb) return { ok: true, reason: "Order Block H1/H4/D1 touche" };
+  if (nearMajorSupport) return { ok: true, reason: "Support majeur HTF" };
+  if (nearMajorResistance) return { ok: true, reason: "Resistance majeure HTF" };
+  if (nearSessionExtreme) return { ok: true, reason: "High/Low session/jour/semaine precedent" };
+  if (liquidityZone) return { ok: true, reason: "Zone de liquidite importante" };
+
+  return { ok: false, reason: "Prix hors zone HTF majeure" };
+}
+
+function detectCounterTrendReaction(candles: Candle[], direction: Direction, atrValue: number) {
+  const recent = candles.filter(Boolean).slice(-12);
+  const last = recent.at(-1);
+  const previous = recent.at(-2);
+  const atr = Math.max(atrValue, last ? last.close * 0.0008 : 0.01, 0.01);
+
+  if (!last || !previous) {
+    return { ok: false, reason: "Bougies de reaction insuffisantes" };
+  }
+
+  const body = Math.abs(last.close - last.open);
+  const lowerWick = Math.min(last.open, last.close) - last.low;
+  const upperWick = last.high - Math.max(last.open, last.close);
+  const bullishRejection = direction === "Bullish" && lowerWick >= Math.max(body * 1.4, atr * 0.55) && last.close > last.open;
+  const bearishRejection = direction === "Bearish" && upperWick >= Math.max(body * 1.4, atr * 0.55) && last.close < last.open;
+  const bullishEngulfing = direction === "Bullish" && last.close > previous.open && last.open <= previous.close && last.close > last.open;
+  const bearishEngulfing = direction === "Bearish" && last.close < previous.open && last.open >= previous.close && last.close < last.open;
+  const recentHigh = Math.max(...recent.slice(0, -1).map((candle) => candle.high));
+  const recentLow = Math.min(...recent.slice(0, -1).map((candle) => candle.low));
+  const choch = direction === "Bullish" ? last.close > recentHigh : last.close < recentLow;
+
+  if (bullishRejection || bearishRejection) return { ok: true, reason: "meche de rejet significative" };
+  if (bullishEngulfing || bearishEngulfing) return { ok: true, reason: "engulfing contre-tendance" };
+  if (choch) return { ok: true, reason: "ChoCH court terme" };
+
+  return { ok: false, reason: "Pas de rejet/engulfing/ChoCH clair" };
+}
+
+function detectCounterTrendSmc({ analysis, candleMap, direction }: { analysis: TechnicalAnalysis; candleMap: Record<Timeframe, Candle[]>; direction: Direction }) {
+  const candidates: Array<{ analysis: TechnicalAnalysis; timeframe: Timeframe }> = [
+    candleMap.M1.length >= MIN_ANALYSIS_CANDLES ? { analysis: analyzeCandles(candleMap.M1), timeframe: "M1" } : null,
+    candleMap.M5.length >= MIN_ANALYSIS_CANDLES ? { analysis: analyzeCandles(candleMap.M5), timeframe: "M5" } : null,
+    candleMap.M15.length >= MIN_ANALYSIS_CANDLES ? { analysis: analyzeCandles(candleMap.M15), timeframe: "M15" } : null,
+  ].filter(Boolean) as Array<{ analysis: TechnicalAnalysis; timeframe: Timeframe }>;
+  const fvgDirection = direction === "Bullish" ? "bullish" : direction === "Bearish" ? "bearish" : null;
+  const matchingFvg = candidates.some(({ analysis: item, timeframe }) => {
+    const fvg = item.fvgAnalysis ?? (fvgDirection ? detectFvgAnalysis(candleMap[timeframe], timeframe, { direction: fvgDirection }) : null);
+    return Boolean(fvg && fvgDirectionMatches(fvg.direction, direction) && (fvg.touched || fvg.rejectionConfirmed || fvg.fresh));
+  });
+  const sweep = analysis.liquiditySweep || candidates.some(({ analysis: item }) => item.liquiditySweep || item.liquidity.sweepDetected);
+  const obRetest = candidates.some(({ analysis: item }) => item.orderBlock && item.orderBlock.touched && (direction === "Bullish" ? item.orderBlock.direction === "bullish" : item.orderBlock.direction === "bearish"));
+  const volatilityOk = analysis.volatility !== "trop dangereuse";
+
+  if (sweep && matchingFvg) return { ok: true, reason: "sweep de liquidite + FVG inverse" };
+  if (sweep && obRetest) return { ok: true, reason: "sweep de liquidite + retest order block" };
+  if (matchingFvg && volatilityOk) return { ok: true, reason: "FVG inverse avec volatilite coherente" };
+
+  return { ok: false, reason: "SMC insuffisant: sweep/FVG/retest manquant" };
+}
+
+function isNearSessionExtreme(candleMap: Record<Timeframe, Candle[]>, direction: Direction, price: number, atr: number) {
+  const reference = [...candleMap.H1.slice(-24), ...candleMap.H4.slice(-12), ...candleMap.D1.slice(-7)];
+  if (!reference.length || price <= 0) {
+    return false;
+  }
+
+  const high = Math.max(...reference.map((candle) => candle.high));
+  const low = Math.min(...reference.map((candle) => candle.low));
+  return direction === "Bullish" ? Math.abs(price - low) <= atr * 1.5 || price <= low + atr * 1.5 : Math.abs(price - high) <= atr * 1.5 || price >= high - atr * 1.5;
 }
 
 function applyEntryQualityGuard(decision: DecisionResult, entryQuality: EntryQualityResult): DecisionResult {
@@ -2479,6 +2705,7 @@ function emptyTimeframeAnalysis({
     trendFilter: null,
     marketScenario: createEmptyMarketScenario(),
     quickAnalysis: null,
+    counterTrend: createNeutralCounterTrendAnalysis(false),
     riskReward: 0,
     summary: waitReason,
   };

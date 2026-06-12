@@ -134,6 +134,10 @@ export interface LiveMarketState {
   candleSync: Record<Timeframe, CandleSyncState>;
 }
 
+export interface LiveMarketController extends LiveMarketState {
+  reconnect: () => void;
+}
+
 export interface SupportResistanceLevel {
   price: number;
   type: "support" | "resistance";

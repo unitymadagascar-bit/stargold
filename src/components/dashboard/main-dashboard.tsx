@@ -208,6 +208,7 @@ export function MainDashboard() {
             onOrbRequireRetestChange={setOrbRequireRetest}
             onPremiumCounterTrendChange={setAllowPremiumCounterTrend}
             onQuickEntryModeChange={setQuickEntryMode}
+            onReconnectLive={live.reconnect}
             onSensitivityChange={setScalpingSensitivity}
             orbDuration={orbDuration}
             orbRequireRetest={orbRequireRetest}
@@ -887,6 +888,7 @@ function SignalModePanel({
   onOrbRequireRetestChange,
   onPremiumCounterTrendChange,
   onQuickEntryModeChange,
+  onReconnectLive,
   onSensitivityChange,
   orbDuration,
   orbRequireRetest,
@@ -910,6 +912,7 @@ function SignalModePanel({
   onOrbRequireRetestChange: (enabled: boolean) => void;
   onPremiumCounterTrendChange: (enabled: boolean) => void;
   onQuickEntryModeChange: (mode: QuickEntryMode) => void;
+  onReconnectLive: () => void;
   onSensitivityChange: (sensitivity: ScalpingSensitivity) => void;
   orbDuration: OrbDuration;
   orbRequireRetest: boolean;
@@ -961,8 +964,15 @@ function SignalModePanel({
         <p className="mt-1 text-xs leading-5 text-slate-200">
           {liveReady
             ? "Aucun polling lent: le graphique recoit les ticks du bridge live, M1/M5 prioritaires, overlays lourds recalcules seulement quand necessaire."
-            : "Flux live indisponible - analyse suspendue. Aucun BUY/SELL tant que le stream MT5/Exness n'est pas synchronise."}
+            : "Flux live indisponible - reconnexion automatique en cours. Aucun BUY/SELL tant que le stream MT5/Exness n'est pas synchronise."}
         </p>
+        <button
+          className="mt-2 rounded border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] text-white transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+          type="button"
+          onClick={onReconnectLive}
+        >
+          Reconnecter le flux
+        </button>
       </div>
       <div className="mt-2 rounded-md border border-amber-300/15 bg-amber-300/5 p-2">
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-200">Entree Analyse rapide</p>

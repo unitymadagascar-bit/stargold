@@ -66,7 +66,7 @@ export type MarketPhase =
 
 export type EntryState = "zone-detected" | "setup-forming" | "confirmed-entry";
 
-export type SignalTimingLevel = "none" | "pre-signal" | "confirmed" | "late";
+export type SignalTimingLevel = "none" | "pre-signal" | "momentum-breakout" | "early-continuation" | "confirmed" | "late";
 
 export type Trend = "bullish" | "bearish" | "range";
 

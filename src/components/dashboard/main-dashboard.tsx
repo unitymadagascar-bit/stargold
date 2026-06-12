@@ -454,6 +454,14 @@ function formatSignalTiming(timing: TradePlan["marketScenario"]["signalTiming"])
     return "Confirme";
   }
 
+  if (timing === "momentum-breakout") {
+    return "Momentum breakout";
+  }
+
+  if (timing === "early-continuation") {
+    return "Continuation rapide";
+  }
+
   if (timing === "late") {
     return "Trop tard";
   }

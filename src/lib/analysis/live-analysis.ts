@@ -65,6 +65,15 @@ interface EntryQualityResult {
   waitFor: string;
 }
 
+interface MomentumBreakoutResult {
+  confidence: number;
+  direction: Direction;
+  lateReason: string | null;
+  missing: string[];
+  reason: string;
+  state: "none" | "watch" | "confirmed" | "late";
+}
+
 interface HigherTimeframeContext {
   trend: Trend;
   strong: boolean;
@@ -201,8 +210,10 @@ export function buildLiveTimeframeAnalyses({
       marketScenario,
       riskReward,
     });
-    const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: rawDecision, direction, marketScenario, riskReward });
-    const decision = applyCounterTrendGuard(rawDecision, counterTrend);
+    const momentumBreakout = evaluateMomentumBreakoutContinuation({ analysis, candleMap, candles, direction, marketScenario, riskReward });
+    const momentumDecision = applyMomentumBreakoutDecision(rawDecision, momentumBreakout);
+    const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: momentumDecision, direction, marketScenario, riskReward });
+    const decision = applyCounterTrendGuard(momentumDecision, counterTrend);
 
     return {
       timeframe,
@@ -379,8 +390,10 @@ export function buildLiveTradePlan({
   const rawPlanDirection = analysisDepth === "quick"
     ? quickAnalysis?.signal === "BUY" ? "Bullish" : quickAnalysis?.signal === "SELL" ? "Bearish" : quickAnalysis?.h1Direction ?? direction
     : analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb.direction : direction;
-  const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: rawDecision, direction: rawPlanDirection, marketScenario, riskReward });
-  const decision = applyCounterTrendGuard(rawDecision, counterTrend);
+  const momentumBreakout = evaluateMomentumBreakoutContinuation({ analysis, candleMap, candles, direction: rawPlanDirection, marketScenario, riskReward });
+  const momentumDecision = applyMomentumBreakoutDecision(rawDecision, momentumBreakout);
+  const counterTrend = evaluateCounterTrendPremium({ allowPremiumCounterTrend, analysis, candleMap, decision: momentumDecision, direction: rawPlanDirection, marketScenario, riskReward });
+  const decision = applyCounterTrendGuard(momentumDecision, counterTrend);
   const orbPlan = analysis.orb && analysis.orb.direction !== "Neutral" ? analysis.orb : null;
   const fvgPlan = analysis.fvgAnalysis;
   const quickDirection = quickAnalysis?.signal === "BUY" ? "Bullish" : quickAnalysis?.signal === "SELL" ? "Bearish" : quickAnalysis?.h1Direction ?? direction;
@@ -538,6 +551,267 @@ function applyCounterTrendGuard(decision: DecisionResult, counterTrend: CounterT
       ? "WAIT: contre-tendance non premium. Attendre sweep, reaction forte, ChoCH, FVG/retest et RR valide."
       : "WAIT: contre-tendance desactivee. Priorite aux trades dans le sens H1.",
   };
+}
+
+function applyMomentumBreakoutDecision(decision: DecisionResult, momentum: MomentumBreakoutResult): DecisionResult {
+  if (isActionableSignal(decision.signal)) {
+    return decision;
+  }
+
+  if (momentum.state === "late") {
+    return {
+      confidence: Math.min(Math.max(decision.confidence, momentum.confidence), 54),
+      missingConditions: [momentum.lateReason ?? "Signal trop tardif", "Attendre pullback", "Zone d'entree ratee", ...decision.missingConditions],
+      signal: "WAIT",
+      waitReason: `WAIT: mouvement detecte mais entree tardive. ${momentum.lateReason ?? "Attendre pullback."}`,
+    };
+  }
+
+  if (momentum.state === "confirmed") {
+    return {
+      confidence: Math.max(decision.confidence, momentum.confidence),
+      missingConditions: momentum.missing,
+      signal: momentum.direction === "Bullish" ? "BUY" : "SELL",
+      waitReason: `${momentum.direction === "Bullish" ? "BUY" : "SELL"}: Momentum Breakout confirme. ${momentum.reason}`,
+    };
+  }
+
+  if (momentum.state === "watch") {
+    return {
+      confidence: Math.max(decision.confidence, momentum.confidence),
+      missingConditions: momentum.missing.length ? momentum.missing : ["Micro pullback ou cloture de confirmation"],
+      signal: momentum.direction === "Bullish" ? "WATCH BUY" : "WATCH SELL",
+      waitReason: `${momentum.direction === "Bullish" ? "WATCH BUY" : "WATCH SELL"}: mouvement fort detecte. ${momentum.reason}`,
+    };
+  }
+
+  if (decision.signal === "WAIT" && decision.missingConditions.length === 0) {
+    return {
+      ...decision,
+      missingConditions: ["Pas de momentum breakout confirme", "Pas de cloture claire", "Retest ou micro-retest manquant"],
+      waitReason: "WAIT: pas assez de confirmation, aucun momentum breakout exploitable.",
+    };
+  }
+
+  return decision;
+}
+
+function evaluateMomentumBreakoutContinuation({
+  analysis,
+  candleMap,
+  candles,
+  direction,
+  marketScenario,
+  riskReward,
+}: {
+  analysis: TechnicalAnalysis;
+  candleMap: Record<Timeframe, Candle[]>;
+  candles: Candle[];
+  direction: Direction;
+  marketScenario: MarketScenario;
+  riskReward: number;
+}): MomentumBreakoutResult {
+  const last = candles.at(-1);
+  const previous = candles.at(-2);
+  const prior = candles.slice(-18, -1);
+  const recent = candles.slice(-6);
+  const price = last?.close ?? 0;
+  const atr = Math.max(analysis.atr, price * 0.0008, 0.01);
+  const h1Analysis = candleMap.H1.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.H1) : null;
+  const h1Direction = h1Analysis ? inferDirection(h1Analysis) : "Neutral";
+  const setupDirection = direction !== "Neutral" ? direction : h1Direction;
+
+  if (!last || !previous || prior.length < 8 || setupDirection === "Neutral") {
+    return createNoMomentumBreakout("Bougies insuffisantes ou direction neutre", setupDirection);
+  }
+
+  const withTrend = h1Direction === "Neutral" || h1Direction === setupDirection;
+  const bullish = setupDirection === "Bullish";
+  const strongBodies = recent.filter((candle) => {
+    const body = Math.abs(candle.close - candle.open);
+    const bodyOk = body >= atr * 0.45;
+    return bullish ? candle.close > candle.open && bodyOk : candle.close < candle.open && bodyOk;
+  }).length;
+  const priorHigh = Math.max(...prior.map((candle) => candle.high));
+  const priorLow = Math.min(...prior.map((candle) => candle.low));
+  const clearBreak = bullish ? last.close > priorHigh + atr * 0.08 : last.close < priorLow - atr * 0.08;
+  const m1MicroBos = detectMicroBreakout(candleMap.M1, setupDirection);
+  const m5MicroBos = detectMicroBreakout(candleMap.M5, setupDirection);
+  const volatilityRising = isVolatilityRising(candles);
+  const consolidationBreak = detectConsolidationBreakout(candles, setupDirection, atr);
+  const usefulZoneBreak = bullish ? last.close > Math.max(analysis.resistance, priorHigh) : last.close < Math.min(analysis.support || priorLow, priorLow);
+  const notNearBarrier = !isNearMajorBarrier({ analysis, candleMap, direction: setupDirection, price, atr });
+  const late = isMomentumMoveLate({ analysis, candles, direction: setupDirection, marketScenario, price, atr });
+  const microPullback = hasMicroPullbackOrRetest(candles, setupDirection, atr, bullish ? priorHigh : priorLow);
+  const rrOk = riskReward >= 1;
+  const closeConfirmed = bullish ? last.close > last.open && last.close > priorHigh : last.close < last.open && last.close < priorLow;
+  const missing = [
+    withTrend ? null : "WAIT parce que tendance HTF contraire",
+    strongBodies >= 2 ? null : "WAIT parce que momentum insuffisant",
+    clearBreak ? null : "WAIT parce que pas de cloture confirmee",
+    m1MicroBos || m5MicroBos || analysis.structure === "BOS" || analysis.structure === "CHoCH" ? null : "WAIT parce que BOS/micro-BOS manquant",
+    volatilityRising ? null : "WAIT parce que volatilite pas encore en hausse",
+    consolidationBreak || usefulZoneBreak ? null : "WAIT parce que sortie de zone/consolidation non claire",
+    notNearBarrier ? null : bullish ? "WAIT parce que proche resistance" : "WAIT parce que proche support",
+    rrOk ? null : "WAIT parce que RR insuffisant",
+    microPullback ? null : "WAIT parce que micro-retest manquant",
+  ].filter(Boolean) as string[];
+  const confidence = clamp(
+    (withTrend ? 14 : -18) +
+      Math.min(strongBodies, 4) * 10 +
+      (clearBreak ? 18 : 0) +
+      (m1MicroBos || m5MicroBos ? 14 : 0) +
+      (volatilityRising ? 10 : 0) +
+      (consolidationBreak ? 10 : usefulZoneBreak ? 7 : 0) +
+      (notNearBarrier ? 10 : -18) +
+      (microPullback ? 10 : 0) +
+      (rrOk ? 8 : -12),
+    100,
+  );
+
+  if (late) {
+    return {
+      confidence,
+      direction: setupDirection,
+      lateReason: "Mouvement detecte mais entree tardive. Attendre pullback.",
+      missing,
+      reason: "Impulsion deja avancee vers la prochaine liquidite.",
+      state: "late",
+    };
+  }
+
+  if (!withTrend || !notNearBarrier || !rrOk || confidence < 58) {
+    return {
+      confidence,
+      direction: setupDirection,
+      lateReason: null,
+      missing,
+      reason: missing[0] ?? "Momentum breakout pas assez confirme.",
+      state: "none",
+    };
+  }
+
+  if (clearBreak && strongBodies >= 2 && (m1MicroBos || m5MicroBos || analysis.structure === "BOS" || analysis.structure === "CHoCH") && volatilityRising) {
+    const reason = `${bullish ? "Cassure high" : "Cassure low"} + corps forts + micro-BOS + volatilite en hausse.`;
+
+    if (closeConfirmed && microPullback && confidence >= 68) {
+      return { confidence, direction: setupDirection, lateReason: null, missing: [], reason, state: "confirmed" };
+    }
+
+    return {
+      confidence,
+      direction: setupDirection,
+      lateReason: null,
+      missing: microPullback ? ["Cloture finale dans le sens du mouvement"] : ["Petit pullback ou micro-retest accepte"],
+      reason,
+      state: "watch",
+    };
+  }
+
+  return {
+    confidence,
+    direction: setupDirection,
+    lateReason: null,
+    missing,
+    reason: missing[0] ?? "Momentum breakout pas assez confirme.",
+    state: "none",
+  };
+}
+
+function createNoMomentumBreakout(reason: string, direction: Direction): MomentumBreakoutResult {
+  return {
+    confidence: 0,
+    direction,
+    lateReason: null,
+    missing: [reason],
+    reason,
+    state: "none",
+  };
+}
+
+function detectMicroBreakout(candles: Candle[], direction: Direction) {
+  if (candles.length < 12 || direction === "Neutral") {
+    return false;
+  }
+
+  const last = candles.at(-1);
+  const prior = candles.slice(-12, -1);
+  if (!last || !prior.length) {
+    return false;
+  }
+
+  const priorHigh = Math.max(...prior.map((candle) => candle.high));
+  const priorLow = Math.min(...prior.map((candle) => candle.low));
+  return direction === "Bullish" ? last.close > priorHigh : last.close < priorLow;
+}
+
+function isVolatilityRising(candles: Candle[]) {
+  if (candles.length < 12) {
+    return false;
+  }
+
+  const ranges = candles.slice(-12).map((candle) => candle.high - candle.low);
+  const recent = average(ranges.slice(-4));
+  const previous = average(ranges.slice(0, 8));
+  return recent >= previous * 1.12;
+}
+
+function detectConsolidationBreakout(candles: Candle[], direction: Direction, atr: number) {
+  if (candles.length < 18 || direction === "Neutral") {
+    return false;
+  }
+
+  const last = candles.at(-1);
+  const box = candles.slice(-18, -3);
+  if (!last || !box.length) {
+    return false;
+  }
+
+  const boxHigh = Math.max(...box.map((candle) => candle.high));
+  const boxLow = Math.min(...box.map((candle) => candle.low));
+  const compressed = boxHigh - boxLow <= atr * 4.2;
+  return compressed && (direction === "Bullish" ? last.close > boxHigh : last.close < boxLow);
+}
+
+function hasMicroPullbackOrRetest(candles: Candle[], direction: Direction, atr: number, brokenLevel: number) {
+  const recent = candles.slice(-5);
+  const last = candles.at(-1);
+  if (!last || recent.length < 3 || direction === "Neutral") {
+    return false;
+  }
+
+  const touchedBrokenLevel = direction === "Bullish"
+    ? recent.some((candle) => candle.low <= brokenLevel + atr * 0.45 && candle.close >= brokenLevel)
+    : recent.some((candle) => candle.high >= brokenLevel - atr * 0.45 && candle.close <= brokenLevel);
+  const smallPause = recent.slice(0, -1).some((candle) => Math.abs(candle.close - candle.open) <= atr * 0.45);
+  const continuationClose = direction === "Bullish" ? last.close > last.open : last.close < last.open;
+  return (touchedBrokenLevel || smallPause) && continuationClose;
+}
+
+function isNearMajorBarrier({ analysis, candleMap, direction, price, atr }: { analysis: TechnicalAnalysis; candleMap: Record<Timeframe, Candle[]>; direction: Direction; price: number; atr: number }) {
+  const h1 = candleMap.H1.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.H1) : null;
+  const h4 = candleMap.H4.length >= MIN_ANALYSIS_CANDLES ? analyzeCandles(candleMap.H4) : null;
+  const references = [analysis, h1, h4].filter(Boolean) as TechnicalAnalysis[];
+  if (direction === "Bullish") {
+    return references.some((item) => item.resistance > price && item.resistance - price <= atr * 1.6);
+  }
+
+  if (direction === "Bearish") {
+    return references.some((item) => item.support > 0 && price > item.support && price - item.support <= atr * 1.6);
+  }
+
+  return false;
+}
+
+function isMomentumMoveLate({ analysis, candles, direction, marketScenario, price, atr }: { analysis: TechnicalAnalysis; candles: Candle[]; direction: Direction; marketScenario: MarketScenario; price: number; atr: number }) {
+  if (marketScenario.signalTiming === "late" || marketScenario.movementProgress >= 72) {
+    return true;
+  }
+
+  const recent = candles.slice(-10);
+  const impulse = recent.length ? Math.abs(price - recent[0].open) : 0;
+  const targetDistance = direction === "Bullish" ? Math.max(0, analysis.resistance - price) : Math.max(0, price - analysis.support);
+  return impulse >= atr * 4.8 || (targetDistance > 0 && targetDistance <= atr * 1.1);
 }
 
 function evaluateCounterTrendPremium({
@@ -1230,6 +1504,7 @@ function evaluateSignalTiming({
   const relevantPreSignal = direction === "Bearish" ? bearishPreSignal : bullishPreSignal;
   const relevantConfirmed = direction === "Bearish" ? bearishConfirmed : bullishConfirmed;
   const relevantRejection = direction === "Bearish" ? bearishRejection || resistanceRejection : bullishRejection || supportRejection;
+  const momentumBreakout = direction === "Bearish" ? brokeLastLow && strongBearishCandle && bearishMomentum : brokeLastHigh && strongBullishCandle && bullishMomentum;
 
   if ((relevantPreSignal || relevantConfirmed || relevantRejection) && tooLate) {
     return {
@@ -1241,6 +1516,10 @@ function evaluateSignalTiming({
 
   if (relevantConfirmed && relevantRejection) {
     return { lateReason: null, movementProgress, signalTiming: "confirmed" as const };
+  }
+
+  if (momentumBreakout && riskReward >= 1 && movementProgress < 60) {
+    return { lateReason: null, movementProgress, signalTiming: relevantRejection ? "early-continuation" as const : "momentum-breakout" as const };
   }
 
   if (relevantPreSignal || relevantRejection) {
@@ -1508,6 +1787,14 @@ function getQuickScenarioText({
 
   if (signalTiming === "pre-signal" && primaryBias !== "Neutral") {
     return `Pre-signal ${primaryBias}: pression detectee, a confirmer.`;
+  }
+
+  if (signalTiming === "momentum-breakout") {
+    return `${primaryBias}: Momentum Breakout detecte, surveiller entree rapide.`;
+  }
+
+  if (signalTiming === "early-continuation") {
+    return `${primaryBias}: continuation rapide detectee apres cassure.`;
   }
 
   if (phase === "high-risk") {
@@ -2730,6 +3017,10 @@ function isTradingViewCryptoVisualProfile(symbolProfile: SymbolProfile) {
 
 function clamp(value: number, max: number) {
   return Math.max(0, Math.min(max, value));
+}
+
+function average(values: number[]) {
+  return values.length ? values.reduce((total, value) => total + value, 0) / values.length : 0;
 }
 
 function round(value: number) {

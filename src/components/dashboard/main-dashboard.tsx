@@ -66,14 +66,16 @@ export function MainDashboard() {
   const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
   const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
   const dataCheck = useMemo(() => buildDataCheck({ activeTimeframe, candleMap: live.candleMap, analysisCandleMap, live, symbolProfile }), [activeTimeframe, analysisCandleMap, live, symbolProfile]);
+  const dataSafeCandleMap = useMemo(() => (dataCheck.status === "SYNC OK" ? analysisCandleMap : createEmptyDashboardCandleMap()), [analysisCandleMap, dataCheck.status]);
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: analysisCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
-    [allowPremiumCounterTrend, analysisCandleMap, analysisDepth, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: dataSafeCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
+    [allowPremiumCounterTrend, analysisDepth, dataSafeCandleMap, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
-  const plan = useMemo(
-    () => buildLiveTradePlan({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: analysisCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, allowPremiumCounterTrend, analysisCandleMap, analysisDepth, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
+  const rawPlan = useMemo(
+    () => buildLiveTradePlan({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: dataSafeCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, allowPremiumCounterTrend, analysisDepth, dataSafeCandleMap, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
+  const plan = useMemo(() => guardPlanForDataSync(rawPlan, dataCheck), [dataCheck, rawPlan]);
   const latestPrice = getLatestPrice(analysisCandleMap) || getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
   const activeAnalysis = timeframeAnalyses.find((item) => item.timeframe === activeTimeframe);
@@ -297,24 +299,30 @@ export function MainDashboard() {
 
 interface DataCheckSummary {
   activeTimeframe: Timeframe;
+  askLabel: string;
+  bidLabel: string;
   brokerSymbol: string;
-  candleCounts: Record<Timeframe, number>;
+  loadedCandleCounts: Record<Timeframe, number>;
+  usedCandleCounts: Record<Timeframe, number>;
   closedCandleLabel: string;
   exactSymbol: string;
   formingCandleLabel: string;
+  lastCandleLabel: string;
   lastSyncLabel: string;
+  localTimeLabel: string;
   serverTimeLabel: string;
   sourceLabel: string;
-  status: "Sync OK" | "Sync retardee" | "Historique insuffisant";
+  spreadLabel: string;
+  status: "SYNC OK" | "RETARD" | "HISTORIQUE INSUFFISANT" | "SOURCE DIFFERENTE";
   statusMessage: string;
   tradingViewWarning: string;
 }
 
 function DataCheckPanel({ data }: { data: DataCheckSummary }) {
   const statusClass =
-    data.status === "Sync OK"
+    data.status === "SYNC OK"
       ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
-      : data.status === "Sync retardee"
+      : data.status === "RETARD"
         ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
         : "border-rose-300/25 bg-rose-300/10 text-rose-100";
 
@@ -333,11 +341,17 @@ function DataCheckPanel({ data }: { data: DataCheckSummary }) {
         <SetupMetric label="Symbole exact" value={data.exactSymbol} />
         <SetupMetric label="Symbole broker" value={data.brokerSymbol} />
         <SetupMetric label="Timeframe actif" value={data.activeTimeframe} />
-        <SetupMetric label="Source donnees" value={data.sourceLabel} />
-        <SetupMetric label="Bougies chargees" value={`M1=${data.candleCounts.M1} / M5=${data.candleCounts.M5} / M15=${data.candleCounts.M15} / H1=${data.candleCounts.H1}`} />
-        <SetupMetric label="Bougie cloturee" value={data.closedCandleLabel} />
+        <SetupMetric label="Source analyse" value={data.sourceLabel} />
+        <SetupMetric label="Bid actuel" value={data.bidLabel} />
+        <SetupMetric label="Ask actuel" value={data.askLabel} />
+        <SetupMetric label="Spread" value={data.spreadLabel} />
+        <SetupMetric label="Bougies chargees" value={`M1=${data.loadedCandleCounts.M1} / M5=${data.loadedCandleCounts.M5} / M15=${data.loadedCandleCounts.M15} / H1=${data.loadedCandleCounts.H1}`} />
+        <SetupMetric label="Bougies analyse" value={`M1=${data.usedCandleCounts.M1} / M5=${data.usedCandleCounts.M5} / M15=${data.usedCandleCounts.M15} / H1=${data.usedCandleCounts.H1}`} />
+        <SetupMetric label="Derniere bougie recue" value={data.lastCandleLabel} />
+        <SetupMetric label="Derniere bougie cloturee" value={data.closedCandleLabel} />
         <SetupMetric label="Bougie en formation" value={data.formingCandleLabel} />
         <SetupMetric label="Heure serveur MT5" value={data.serverTimeLabel} />
+        <SetupMetric label="Heure locale" value={data.localTimeLabel} />
         <SetupMetric label="Derniere synchro" value={data.lastSyncLabel} />
       </div>
 
@@ -692,8 +706,9 @@ function MarketSummary({
   priceChangePercent: number;
   symbolProfile: SymbolProfile;
 }) {
-  const bearish = plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "PRE-SIGNAL SELL" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "SELL" || plan.decision === "STRONG SELL");
-  const bullish = plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "PRE-SIGNAL BUY" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "BUY" || plan.decision === "STRONG BUY");
+  const missed = plan.decision === "SIGNAL MISSED";
+  const bearish = !missed && plan.decision !== "WAIT" && (plan.direction === "Bearish" || plan.decision === "PRE-SIGNAL SELL" || plan.decision === "WATCH SELL" || plan.decision === "SELL SCALP READY" || plan.decision === "SELL" || plan.decision === "STRONG SELL");
+  const bullish = !missed && plan.decision !== "WAIT" && (plan.direction === "Bullish" || plan.decision === "PRE-SIGNAL BUY" || plan.decision === "WATCH BUY" || plan.decision === "BUY SCALP READY" || plan.decision === "BUY" || plan.decision === "STRONG BUY");
   const scoreColor = bullish ? "#22c55e" : bearish ? "#ff333d" : "#f59e0b";
 
   return (
@@ -1613,6 +1628,51 @@ function buildOfficialMt5AnalysisCandleMap(live: LiveMarketState): Record<Timefr
   );
 }
 
+function createEmptyDashboardCandleMap(): Record<Timeframe, Candle[]> {
+  return timeframes.reduce(
+    (map, timeframe) => {
+      map[timeframe] = [];
+      return map;
+    },
+    {} as Record<Timeframe, Candle[]>,
+  );
+}
+
+function guardPlanForDataSync(plan: TradePlan, dataCheck: DataCheckSummary): TradePlan {
+  if (dataCheck.status === "SYNC OK") {
+    return plan;
+  }
+
+  const reason =
+    dataCheck.status === "SOURCE DIFFERENTE"
+      ? "Analyse suspendue : donnees non synchronisees. Source graphique/analyse differente de MT5/Exness."
+      : dataCheck.status === "RETARD"
+        ? "Analyse suspendue : donnees non synchronisees. La derniere synchronisation MT5 est en retard."
+        : "Historique insuffisant pour analyse fiable.";
+  const waitReason =
+    dataCheck.status === "SOURCE DIFFERENTE"
+      ? "WAIT : donnees non synchronisees"
+      : dataCheck.status === "RETARD"
+        ? "WAIT : donnees non synchronisees"
+        : "WAIT : historique insuffisant";
+
+  return {
+    ...plan,
+    alerts: [reason, ...plan.alerts],
+    decision: "WAIT",
+    directionalBias: "Neutral",
+    direction: "Neutral",
+    entryConfirmation: "Not confirmed",
+    entryRiskLevel: "High",
+    missingConditions: [waitReason, reason, ...plan.missingConditions],
+    score: Math.min(plan.score, 25),
+    signalReason: reason,
+    summary: reason,
+    waitFor: dataCheck.status === "HISTORIQUE INSUFFISANT" ? "Charger assez de bougies OHLC MT5 officielles." : "Retablir une source MT5/Exness synchronisee.",
+    waitReason,
+  };
+}
+
 function getClosedOfficialCandles(candles: Candle[], tickTime: number | undefined, timeframe: Timeframe) {
   const last = candles.at(-1);
 
@@ -1645,34 +1705,52 @@ function buildDataCheck({
   const closedCandle = isForming ? activeDisplayCandles.at(-2) ?? null : lastDisplayCandle;
   const lastSync = getLatestSyncTime(live);
   const staleMs = lastSync ? Date.now() - Date.parse(lastSync) : Number.POSITIVE_INFINITY;
-  const counts = timeframes.reduce(
+  const loadedCounts = timeframes.reduce(
+    (accumulator, timeframe) => ({
+      ...accumulator,
+      [timeframe]: candleMap[timeframe].length,
+    }),
+    {} as Record<Timeframe, number>,
+  );
+  const usedCounts = timeframes.reduce(
     (accumulator, timeframe) => ({
       ...accumulator,
       [timeframe]: analysisCandleMap[timeframe].length,
     }),
     {} as Record<Timeframe, number>,
   );
-  const enoughCoreHistory = counts.M1 >= 50 && counts.M5 >= 50 && counts.M15 >= 50;
+  const enoughCoreHistory = usedCounts.M1 >= 50 && usedCounts.M5 >= 50 && usedCounts.M15 >= 50;
   const sourceLabel = activeSync?.source ?? live.source ?? "unavailable";
   const brokerSymbol = activeSync?.brokerSymbol ?? live.brokerSymbol ?? live.lastTick?.symbol ?? symbolProfile.symbol;
-  const status: DataCheckSummary["status"] = !enoughCoreHistory ? "Historique insuffisant" : staleMs > 20_000 ? "Sync retardee" : "Sync OK";
+  const loadedAny = Object.values(loadedCounts).some((count) => count > 0);
+  const sourceDifferent = loadedAny && (!activeSync?.official || !isExnessSource(sourceLabel));
+  const status: DataCheckSummary["status"] = sourceDifferent ? "SOURCE DIFFERENTE" : !enoughCoreHistory ? "HISTORIQUE INSUFFISANT" : staleMs > 20_000 ? "RETARD" : "SYNC OK";
   const statusMessage =
-    status === "Sync OK"
+    status === "SYNC OK"
       ? "Les signaux utilisent les bougies OHLC MT5/Exness disponibles. Les bougies en formation restent non confirmees."
-      : status === "Sync retardee"
+      : status === "RETARD"
         ? "La derniere synchronisation MT5 est en retard. Evite les signaux scalping tant que le flux n'est pas frais."
-        : "Historique insuffisant pour analyse fiable. Les signaux sont bloques/limites tant que les OHLC MT5 officiels ne sont pas charges.";
+        : status === "SOURCE DIFFERENTE"
+          ? "Analyse suspendue : la source affichee ou chargee n'est pas confirmee MT5/Exness. Les signaux BUY/SELL sont bloques."
+          : "Historique insuffisant pour analyse fiable. Les signaux sont bloques tant que les OHLC MT5 officiels ne sont pas charges.";
+  const spreadValue = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
 
   return {
     activeTimeframe,
+    askLabel: formatPrice(live.lastTick?.ask),
+    bidLabel: formatPrice(live.lastTick?.bid),
     brokerSymbol,
-    candleCounts: counts,
+    loadedCandleCounts: loadedCounts,
+    usedCandleCounts: usedCounts,
     closedCandleLabel: closedCandle ? formatCandleLabel(closedCandle) : "--",
     exactSymbol: symbolProfile.symbol,
     formingCandleLabel: isForming && lastDisplayCandle ? formatCandleLabel(lastDisplayCandle) : "Aucune bougie en formation detectee",
+    lastCandleLabel: lastDisplayCandle ? formatCandleLabel(lastDisplayCandle) : "--",
     lastSyncLabel: lastSync ? new Date(lastSync).toLocaleString("fr-FR", { hour12: false }) : "--",
+    localTimeLabel: new Date().toLocaleString("fr-FR", { hour12: false }),
     serverTimeLabel: live.lastTick ? formatTickDateTime(live.lastTick.time) : "--",
     sourceLabel,
+    spreadLabel: spreadValue === null ? "--" : spreadValue.toFixed(symbolProfile.category === "Forex" ? 5 : 2),
     status,
     statusMessage,
     tradingViewWarning: "TradingView peut differer de MT5 si le broker/source n'est pas identique. Les signaux de trading sont bases sur les bougies OHLC MT5/Exness officielles quand elles sont disponibles.",

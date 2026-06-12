@@ -9,6 +9,7 @@ export type Signal =
   | "ORB BREAKOUT WATCH"
   | "FVG RETEST WATCH"
   | "WAIT"
+  | "SIGNAL MISSED"
   | "PRE-SIGNAL SELL"
   | "WATCH SELL"
   | "SELL SCALP READY"

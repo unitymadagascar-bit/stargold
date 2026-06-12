@@ -573,8 +573,8 @@ function applyMomentumBreakoutDecision(decision: DecisionResult, momentum: Momen
     return {
       confidence: Math.min(Math.max(decision.confidence, momentum.confidence), 54),
       missingConditions: [...lateDetails, ...decision.missingConditions],
-      signal: "WAIT",
-      waitReason: `WAIT: signal rate, entree trop tardive. ${momentum.lateReason ?? "Attendre pullback."}`,
+      signal: "SIGNAL MISSED",
+      waitReason: `SIGNAL MISSED: mouvement detecte mais entree tardive. Attendre pullback. Zone d'entree ratee. Ne pas courir apres le prix. ${momentum.lateReason ?? ""}`,
     };
   }
 
@@ -1671,8 +1671,8 @@ function evaluateQuickSignal({
     return {
       confidence: Math.min(Math.max(marketScenario.confidence, confidence), 54),
       missingConditions: ["Signal rate", "Entree trop tardive", "Attendre pullback", previousZone, marketScenario.lateReason ?? "Signal tardif", ...missingConditions],
-      signal: "WAIT",
-      waitReason: `WAIT: Signal rate. Entree trop tardive, attendre pullback. ${previousZone}.`,
+      signal: "SIGNAL MISSED",
+      waitReason: `SIGNAL MISSED: Mouvement detecte mais entree tardive. Attendre pullback. Zone d'entree ratee. Ne pas courir apres le prix. ${previousZone}.`,
     };
   }
 
@@ -3005,6 +3005,10 @@ function getPlanTimeframe(candleMap: Record<Timeframe, Candle[]>, mode: SignalMo
 
 function summarizeDecision(decision: Signal, direction: Direction, mode: SignalMode, analysisDepth: AnalysisDepth) {
   if (analysisDepth === "quick") {
+    if (decision === "SIGNAL MISSED") {
+      return "Analyse rapide: mouvement detecte mais entree trop tardive, attendre pullback.";
+    }
+
     if (decision === "PRE-SIGNAL BUY" || decision === "PRE-SIGNAL SELL") {
       return `Analyse rapide: ${decision}, pression detectee mais entree non confirmee.`;
     }
@@ -3026,6 +3030,10 @@ function summarizeDecision(decision: Signal, direction: Direction, mode: SignalM
 
   if (decision === "BUY" || decision === "SELL") {
     return `Setup ${direction.toLowerCase()} confirme par le moteur de categorie.`;
+  }
+
+  if (decision === "SIGNAL MISSED") {
+    return "Mouvement detecte mais entree tardive. Ne pas courir apres le prix.";
   }
 
   if (decision === "PRE-SIGNAL BUY" || decision === "PRE-SIGNAL SELL") {

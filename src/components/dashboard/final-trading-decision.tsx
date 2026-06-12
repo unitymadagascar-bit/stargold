@@ -29,6 +29,7 @@ export function FinalTradingDecision({ activeAnalysis, activeTimeframe, analysis
     final.signal === "WAIT" ||
     final.signal === "PRE-SIGNAL BUY" ||
     final.signal === "PRE-SIGNAL SELL" ||
+    final.signal === "SIGNAL MISSED" ||
     final.signal === "WATCH BUY" ||
     final.signal === "WATCH SELL" ||
     final.signal === "ORB BREAKOUT WATCH" ||
@@ -173,8 +174,9 @@ function getFinalDecision({
   plan: TradePlan;
 }) {
   const signal = plan.decision;
-  const bearish = signal === "PRE-SIGNAL SELL" || signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || plan.directionalBias === "Sell" || (signal !== "WAIT" && plan.direction === "Bearish");
-  const bullish = signal === "PRE-SIGNAL BUY" || signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || plan.directionalBias === "Buy" || (signal !== "WAIT" && plan.direction === "Bullish");
+  const missed = signal === "SIGNAL MISSED";
+  const bearish = !missed && (signal === "PRE-SIGNAL SELL" || signal === "WATCH SELL" || signal === "SELL SCALP READY" || signal === "SELL" || signal === "STRONG SELL" || plan.directionalBias === "Sell" || (signal !== "WAIT" && plan.direction === "Bearish"));
+  const bullish = !missed && (signal === "PRE-SIGNAL BUY" || signal === "WATCH BUY" || signal === "BUY SCALP READY" || signal === "BUY" || signal === "STRONG BUY" || plan.directionalBias === "Buy" || (signal !== "WAIT" && plan.direction === "Bullish"));
   const orderBlock = activeAnalysis?.orderBlock ?? plan.orderBlock;
   const liquidity = activeAnalysis?.liquidity ?? plan.liquidity;
   const orb = plan.orb ?? activeAnalysis?.orb;
@@ -262,6 +264,10 @@ function getFinalDecision({
 }
 
 function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "SIGNAL MISSED") {
+    return "SIGNAL RATE";
+  }
+
   if (signal === "PRE-SIGNAL BUY") {
     return "PRE-SIGNAL BUY";
   }
@@ -286,11 +292,19 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
     return "WATCH SELL";
   }
 
-  if (signal === "BUY" || (signal !== "WAIT" && bullish)) {
+  if (signal === "BUY") {
+    return "SIGNAL CONFIRME BUY";
+  }
+
+  if (signal === "SELL") {
+    return "SIGNAL CONFIRME SELL";
+  }
+
+  if (signal !== "WAIT" && bullish) {
     return "BUY";
   }
 
-  if (signal === "SELL" || (signal !== "WAIT" && bearish)) {
+  if (signal !== "WAIT" && bearish) {
     return "SELL";
   }
 
@@ -298,6 +312,10 @@ function getActionLabel({ bearish, bullish, signal }: { bearish: boolean; bullis
 }
 
 function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
+  if (signal === "SIGNAL MISSED") {
+    return "Mouvement detecte mais entree tardive. Attendre pullback, ne pas courir apres le prix.";
+  }
+
   if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
     return "Pre-signal seulement. Ne pas entrer: attendre la cloture, le retest ou la confirmation indiquee.";
   }
@@ -338,6 +356,10 @@ function getActionSubtitle({ bearish, bullish, signal }: { bearish: boolean; bul
 }
 
 function getDirectionBias({ bearish, bullish, plan, signal }: { bearish: boolean; bullish: boolean; plan: TradePlan; signal: Signal }) {
+  if (signal === "SIGNAL MISSED") {
+    return "Entree trop tardive";
+  }
+
   if (signal === "PRE-SIGNAL BUY") {
     return "Pression BUY precoce";
   }
@@ -430,6 +452,10 @@ function getDirectionTone({ bearish, bullish }: { bearish: boolean; bullish: boo
 }
 
 function getNextConfirmation({ missingCondition, signal }: { missingCondition: string; signal: Signal }) {
+  if (signal === "SIGNAL MISSED") {
+    return "Attendre pullback vers la zone precedente ou nouveau pre-signal propre.";
+  }
+
   if (signal === "PRE-SIGNAL BUY") {
     return missingCondition || "Attendre retest FVG ou cloture au-dessus du dernier high.";
   }
@@ -468,6 +494,10 @@ function getNextConfirmation({ missingCondition, signal }: { missingCondition: s
 function getEntryInstruction({ bearish, bullish, signal }: { bearish: boolean; bullish: boolean; signal: Signal }) {
   if (signal === "WAIT") {
     return "Do not enter. Wait for every checklist item to turn valid.";
+  }
+
+  if (signal === "SIGNAL MISSED") {
+    return "Do not enter. Entry is late; wait for a pullback or a new setup.";
   }
 
   if (signal === "PRE-SIGNAL BUY" || signal === "PRE-SIGNAL SELL") {
@@ -528,7 +558,7 @@ function getInvalidation({ orderBlock, plan, newsUnsafe, signal }: { orderBlock:
     return "Blocked: red USD news risk";
   }
 
-  if (signal === "WAIT") {
+  if (signal === "WAIT" || signal === "SIGNAL MISSED") {
     return "Any entry is invalid until missing condition is confirmed";
   }
 
@@ -703,6 +733,14 @@ function ChecklistItem({ label, status }: { label: string; status: CheckStatus }
 }
 
 function getSignalTone(signal: Signal) {
+  if (signal === "SIGNAL MISSED") {
+    return {
+      badge: "border-zinc-300/25 bg-zinc-300/10 text-zinc-100",
+      border: "border-zinc-300/20",
+      header: "bg-zinc-300/10",
+    };
+  }
+
   if (signal === "PRE-SIGNAL BUY") {
     return {
       badge: "border-cyan-300/25 bg-cyan-300/10 text-cyan-100",

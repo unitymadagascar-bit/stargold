@@ -1608,7 +1608,7 @@ function buildRiskRewardOverlay({
   plan: TradePlan;
   series: ISeriesApi<"Candlestick">;
 }): RiskRewardOverlay | null {
-  if (plan.decision === "WAIT" || plan.direction === "Neutral") {
+  if (plan.decision === "WAIT" || plan.decision === "SIGNAL MISSED" || plan.direction === "Neutral") {
     return null;
   }
 
@@ -1722,8 +1722,10 @@ function RiskRewardNotice({ message }: { message: string }) {
 }
 
 function getRiskRewardNotice(plan: TradePlan) {
-  if (plan.decision === "WAIT" || plan.direction === "Neutral") {
-    return "Masque: la decision finale est WAIT. Le RR box apparait seulement quand un plan PRE-SIGNAL, WATCH ou SCALP READY existe.";
+  if (plan.decision === "WAIT" || plan.decision === "SIGNAL MISSED" || plan.direction === "Neutral") {
+    return plan.decision === "SIGNAL MISSED"
+      ? "Masque: signal rate, entree trop tardive. Attendre pullback avant d'afficher un nouveau plan RR."
+      : "Masque: la decision finale est WAIT. Le RR box apparait seulement quand un plan PRE-SIGNAL, WATCH ou SCALP READY existe.";
   }
 
   const validPrices = [plan.entry, plan.stopLoss, plan.takeProfits[0], plan.takeProfits[1]].every((price) => Number.isFinite(price) && price > 0);

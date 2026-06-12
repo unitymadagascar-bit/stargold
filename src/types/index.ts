@@ -113,14 +113,24 @@ export interface MarketTick {
 
 export type LiveConnectionStatus = "missing-config" | "connecting" | "live" | "reconnecting" | "error" | "closed";
 
+export interface CandleSyncState {
+  brokerSymbol: string | null;
+  official: boolean;
+  reconstructed: boolean;
+  source: string | null;
+  updatedAt: string | null;
+}
+
 export interface LiveMarketState {
   status: LiveConnectionStatus;
   message: string;
   source: string | null;
+  brokerSymbol: string | null;
   lastTick: MarketTick | null;
   serverOffsetMinutes: number;
   latencyMs: number | null;
   candleMap: Record<Timeframe, Candle[]>;
+  candleSync: Record<Timeframe, CandleSyncState>;
 }
 
 export interface SupportResistanceLevel {

@@ -28,6 +28,7 @@ export async function GET(request: Request) {
       {
         source: result.provider,
         symbol: result.symbol,
+        brokerSymbol: result.brokerSymbol ?? result.symbol,
         timeframe,
         updatedAt: new Date().toISOString(),
         warning: result.warning,
@@ -41,6 +42,7 @@ export async function GET(request: Request) {
         error: error instanceof Error ? error.message : `Historique ${symbol} indisponible.`,
         source: "unavailable",
         symbol,
+        brokerSymbol: symbol,
         timeframe,
         updatedAt: new Date().toISOString(),
         candles: [],

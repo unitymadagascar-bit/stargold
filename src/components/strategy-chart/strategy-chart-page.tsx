@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { BarChart3, CheckCircle2, Eye, EyeOff, Gauge, Layers3, Target, Zap } from "lucide-react";
-import type { QuickEntryMode, SymbolProfile, Timeframe } from "@/types";
+import type { Candle, LiveMarketState, QuickEntryMode, SymbolProfile, Timeframe } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { SignalBadge } from "@/components/ui/signal-badge";
 import { useFundamentalContext } from "@/hooks/use-fundamental-context";
@@ -13,6 +13,7 @@ import { buildLiveTimeframeAnalyses, buildLiveTradePlan } from "@/lib/analysis/l
 import { macroContext, newsEvents } from "@/lib/static-context";
 import { defaultRiskSettings } from "@/lib/risk/risk";
 import { getSymbolProfile, getSymbolsByCategory, normalizeSymbol } from "@/lib/symbols/profiles";
+import { timeframeSeconds, timeframes } from "@/lib/market/timeframes";
 
 const strategyTimeframes: Timeframe[] = ["M5", "M15", "H1"];
 
@@ -26,13 +27,14 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
   const live = useLiveXauusd(symbolProfile.symbol);
   const fundamentals = useFundamentalContext();
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
+  const analysisCandleMap = useMemo(() => buildOfficialMt5AnalysisCandleMap(live), [live.candleMap, live.candleSync, live.lastTick?.time]);
   const analyses = useMemo(
     () =>
       buildLiveTimeframeAnalyses({
         allowPremiumCounterTrend,
         analysisDepth: "quick",
         analysisSource: live.source,
-        candleMap: live.candleMap,
+        candleMap: analysisCandleMap,
         fundamental: fundamentals.fundamental,
         macro: macroContext,
         mode: "scalping",
@@ -41,7 +43,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         spread,
         symbolProfile,
       }),
-    [activeTimeframe, allowPremiumCounterTrend, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
+    [activeTimeframe, allowPremiumCounterTrend, analysisCandleMap, entryMode, fundamentals.fundamental, live.source, spread, symbolProfile],
   );
   const plan = useMemo(
     () =>
@@ -49,7 +51,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         allowPremiumCounterTrend,
         analysisDepth: "quick",
         analysisSource: live.source,
-        candleMap: live.candleMap,
+        candleMap: analysisCandleMap,
         fundamental: fundamentals.fundamental,
         macro: macroContext,
         mode: "scalping",
@@ -60,7 +62,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         spread,
         symbolProfile,
       }),
-    [activeTimeframe, allowPremiumCounterTrend, entryMode, fundamentals.fundamental, live.candleMap, live.source, spread, symbolProfile],
+    [activeTimeframe, allowPremiumCounterTrend, analysisCandleMap, entryMode, fundamentals.fundamental, live.source, spread, symbolProfile],
   );
   const activeAnalysis = analyses.find((analysis) => analysis.timeframe === activeTimeframe);
   const quick = plan.quickAnalysis;
@@ -126,6 +128,7 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
         <div className="min-w-0">
           <GoldChart
             candleMap={live.candleMap}
+            candleSync={live.candleSync}
             connectionMessage={live.message}
             connectionSource={live.source}
             connectionStatus={live.status}
@@ -157,6 +160,27 @@ export function StrategyChartPage({ initialSymbol }: { initialSymbol: string }) 
       </section>
     </main>
   );
+}
+
+function buildOfficialMt5AnalysisCandleMap(live: LiveMarketState): Record<Timeframe, Candle[]> {
+  return timeframes.reduce(
+    (map, timeframe) => {
+      const sync = live.candleSync[timeframe];
+      map[timeframe] = sync?.official ? getClosedOfficialCandles(live.candleMap[timeframe], live.lastTick?.time, timeframe) : [];
+      return map;
+    },
+    {} as Record<Timeframe, Candle[]>,
+  );
+}
+
+function getClosedOfficialCandles(candles: Candle[], tickTime: number | undefined, timeframe: Timeframe) {
+  const last = candles.at(-1);
+
+  if (!last || !tickTime) {
+    return candles;
+  }
+
+  return tickTime < last.time + timeframeSeconds[timeframe] ? candles.slice(0, -1) : candles;
 }
 
 function StrategyResultCard({ plan, symbolProfile }: { plan: ReturnType<typeof buildLiveTradePlan>; symbolProfile: SymbolProfile }) {

@@ -60,7 +60,7 @@ export async function GET(request: Request) {
     }
   }
 
-  return NextResponse.json(await getMt5Status(), { headers: bridgeCorsHeaders });
+  return NextResponse.json(await getMt5Status(url.searchParams.get("symbol") ?? "XAUUSD"), { headers: bridgeCorsHeaders });
 }
 
 export async function POST(request: Request) {

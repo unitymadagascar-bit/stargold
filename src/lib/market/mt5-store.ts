@@ -30,6 +30,7 @@ interface Mt5BridgeGlobal {
 }
 
 export interface Mt5MarketResult<T> {
+  brokerSymbol?: string;
   data: T;
   provider: string;
   symbol: string;
@@ -93,6 +94,7 @@ export async function ingestMt5Payload(payload: unknown): Promise<Mt5MarketResul
   }
 
   return {
+    brokerSymbol: store.brokerSymbol,
     data: getCounts(store.candleMap),
     provider: store.source,
     symbol: store.symbol,
@@ -108,6 +110,7 @@ export async function getMt5History(timeframe: Timeframe, limit: number, symbol 
 
   if (candles.length && !isStale(store.updatedAt, STALE_HISTORY_MS)) {
     return {
+      brokerSymbol: store.brokerSymbol,
       data: candles.slice(-limit),
       provider: store.source,
       symbol: store.symbol,
@@ -123,6 +126,7 @@ export async function getMt5History(timeframe: Timeframe, limit: number, symbol 
   }
 
   return {
+    brokerSymbol: persistedHistory.symbol,
     data: persistedHistory.data.slice(-limit),
     provider: persistedHistory.provider,
     symbol: persistedHistory.symbol,
@@ -137,6 +141,7 @@ export async function getMt5Tick(symbol = "XAUUSD"): Promise<Mt5MarketResult<Mar
 
   if (store.lastTick && !isStale(store.updatedAt, STALE_TICK_MS)) {
     return {
+      brokerSymbol: store.brokerSymbol,
       data: store.lastTick,
       provider: store.source,
       symbol: store.symbol,
@@ -152,6 +157,7 @@ export async function getMt5Tick(symbol = "XAUUSD"): Promise<Mt5MarketResult<Mar
   }
 
   return {
+    brokerSymbol: persistedTick.brokerSymbol ?? persistedTick.symbol,
     data: persistedTick.data,
     provider: persistedTick.provider,
     symbol: persistedTick.symbol,

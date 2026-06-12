@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Activity, Bell, BellRing, Clock, Gauge, ShieldCheck, Target, Volume2, Wifi, WifiOff, Zap } from "lucide-react";
-import type { AnalysisDepth, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, QuickEntryMode, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
+import type { AnalysisDepth, Candle, FundamentalContext, LiquidityAnalysis, LiveMarketState, MovingAverageType, OrbDuration, OrderBlockZone, QuickEntryMode, RiskSettings, ScalpingSensitivity, Signal, SignalMode, SymbolProfile, Timeframe, TimeframeAnalysis, TradePlan } from "@/types";
 import { GoldChart } from "@/components/chart/gold-chart";
 import { FundamentalPanel } from "@/components/fundamentals/fundamental-panel";
 import { FinalTradingDecision } from "@/components/dashboard/final-trading-decision";
@@ -20,6 +20,7 @@ import { buildLiveTimeframeAnalyses, buildLiveTradePlan, getLatestPrice } from "
 import { macroContext, newsEvents } from "@/lib/static-context";
 import { getSymbolProfile, getSymbolsByCategory, normalizeSymbol } from "@/lib/symbols/profiles";
 import { defaultRiskSettings, normalizeRiskSettings } from "@/lib/risk/risk";
+import { timeframeSeconds, timeframes } from "@/lib/market/timeframes";
 
 const alertCooldownOptions = [
   { label: "30 sec", value: 30_000 },
@@ -57,21 +58,23 @@ export function MainDashboard() {
   const lastAlertRef = useRef<{ id: string; time: number }>({ id: "", time: 0 });
   const spread = live.lastTick?.bid !== undefined && live.lastTick.ask !== undefined ? Math.abs(live.lastTick.ask - live.lastTick.bid) : null;
   const exnessSourceConfirmed = isExnessSource(live.source);
+  const analysisCandleMap = useMemo(() => buildOfficialMt5AnalysisCandleMap(live), [live.candleMap, live.candleSync, live.lastTick?.time]);
   const hasCryptoOhlcFeed = symbolProfile.category === "Crypto" && Object.values(live.candleMap).some((candles) => candles.length >= 30);
   const cryptoTradingViewMode = isTradingViewCryptoSymbol(symbolProfile.symbol);
   const chartSourceLabel = cryptoTradingViewMode && !exnessSourceConfirmed ? "TradingView Crypto" : "MT5 Bridge";
   const analysisSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : symbolProfile.category === "Crypto" ? (hasCryptoOhlcFeed ? "Crypto OHLC Feed" : "TradingView visual mode") : "MT5 Bridge OHLC";
   const executionSourceLabel = exnessSourceConfirmed ? "Exness / MT5 Bridge" : "Exness WebTrading / MT5 Bridge non connecte";
   const syncState = getSyncState({ analysisSourceLabel, chartSourceLabel, executionSourceLabel, liveSource: live.source, symbolProfile });
+  const dataCheck = useMemo(() => buildDataCheck({ activeTimeframe, candleMap: live.candleMap, analysisCandleMap, live, symbolProfile }), [activeTimeframe, analysisCandleMap, live, symbolProfile]);
   const timeframeAnalyses = useMemo(
-    () => buildLiveTimeframeAnalyses({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
-    [allowPremiumCounterTrend, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTimeframeAnalyses({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: analysisCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, spread, symbolProfile }),
+    [allowPremiumCounterTrend, analysisCandleMap, analysisDepth, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
   const plan = useMemo(
-    () => buildLiveTradePlan({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: live.candleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
-    [activeTimeframe, allowPremiumCounterTrend, analysisDepth, fundamentals.fundamental, live.candleMap, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
+    () => buildLiveTradePlan({ allowPremiumCounterTrend, analysisDepth, analysisSource: live.source, candleMap: analysisCandleMap, fundamental: fundamentals.fundamental, macro: macroContext, mode: signalMode, movingAveragePeriod, movingAverageType, news: newsEvents, orbDuration, orbRequireRetest, preferredTimeframe: activeTimeframe, quickEntryMode, riskSettings, scalpingSensitivity, spread, symbolProfile }),
+    [activeTimeframe, allowPremiumCounterTrend, analysisCandleMap, analysisDepth, fundamentals.fundamental, live.source, movingAveragePeriod, movingAverageType, orbDuration, orbRequireRetest, quickEntryMode, riskSettings, scalpingSensitivity, signalMode, spread, symbolProfile],
   );
-  const latestPrice = getLatestPrice(live.candleMap);
+  const latestPrice = getLatestPrice(analysisCandleMap) || getLatestPrice(live.candleMap);
   const activeCandles = live.candleMap[activeTimeframe];
   const activeAnalysis = timeframeAnalyses.find((item) => item.timeframe === activeTimeframe);
   const latestCandle = activeCandles.at(-1) ?? null;
@@ -162,6 +165,7 @@ export function MainDashboard() {
       <BrandHeader selectedSymbol={symbolProfile.symbol} />
       <SymbolSelector profile={symbolProfile} selectedSymbol={selectedSymbol} onSymbolChange={setSelectedSymbol} />
       <Mt5ConnectionHeader live={live} spread={spread} />
+      <DataCheckPanel data={dataCheck} />
 
       <section className="grid gap-3 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,1fr)]">
         <MarketSummary
@@ -223,6 +227,7 @@ export function MainDashboard() {
         <div className="order-1 space-y-3 lg:order-2">
           <GoldChart
             candleMap={live.candleMap}
+            candleSync={live.candleSync}
             connectionMessage={live.message}
             connectionSource={live.source}
             connectionStatus={live.status}
@@ -287,6 +292,59 @@ export function MainDashboard() {
         </aside>
       </section>
     </main>
+  );
+}
+
+interface DataCheckSummary {
+  activeTimeframe: Timeframe;
+  brokerSymbol: string;
+  candleCounts: Record<Timeframe, number>;
+  closedCandleLabel: string;
+  exactSymbol: string;
+  formingCandleLabel: string;
+  lastSyncLabel: string;
+  serverTimeLabel: string;
+  sourceLabel: string;
+  status: "Sync OK" | "Sync retardee" | "Historique insuffisant";
+  statusMessage: string;
+  tradingViewWarning: string;
+}
+
+function DataCheckPanel({ data }: { data: DataCheckSummary }) {
+  const statusClass =
+    data.status === "Sync OK"
+      ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100"
+      : data.status === "Sync retardee"
+        ? "border-amber-300/25 bg-amber-300/10 text-amber-100"
+        : "border-rose-300/25 bg-rose-300/10 text-rose-100";
+
+  return (
+    <section className="mt-3 rounded-md border border-white/10 bg-[#111418] p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Data Check</p>
+          <h2 className="mt-1 text-base font-black text-white">Synchronisation bougies MT5 / Exness</h2>
+          <p className="mt-1 text-xs leading-5 text-slate-400">{data.statusMessage}</p>
+        </div>
+        <span className={`rounded border px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] ${statusClass}`}>{data.status}</span>
+      </div>
+
+      <div className="mt-3 grid gap-2 text-xs md:grid-cols-2 xl:grid-cols-4">
+        <SetupMetric label="Symbole exact" value={data.exactSymbol} />
+        <SetupMetric label="Symbole broker" value={data.brokerSymbol} />
+        <SetupMetric label="Timeframe actif" value={data.activeTimeframe} />
+        <SetupMetric label="Source donnees" value={data.sourceLabel} />
+        <SetupMetric label="Bougies chargees" value={`M1=${data.candleCounts.M1} / M5=${data.candleCounts.M5} / M15=${data.candleCounts.M15} / H1=${data.candleCounts.H1}`} />
+        <SetupMetric label="Bougie cloturee" value={data.closedCandleLabel} />
+        <SetupMetric label="Bougie en formation" value={data.formingCandleLabel} />
+        <SetupMetric label="Heure serveur MT5" value={data.serverTimeLabel} />
+        <SetupMetric label="Derniere synchro" value={data.lastSyncLabel} />
+      </div>
+
+      <p className="mt-3 rounded-md border border-sky-300/20 bg-sky-300/10 px-3 py-2 text-xs leading-5 text-sky-100">
+        {data.tradingViewWarning}
+      </p>
+    </section>
   );
 }
 
@@ -1542,6 +1600,107 @@ function formatDxyDirection(direction: FundamentalContext["dxy"]["direction"]) {
   }
 
   return "Neutral";
+}
+
+function buildOfficialMt5AnalysisCandleMap(live: LiveMarketState): Record<Timeframe, Candle[]> {
+  return timeframes.reduce(
+    (map, timeframe) => {
+      const sync = live.candleSync[timeframe];
+      map[timeframe] = sync?.official ? getClosedOfficialCandles(live.candleMap[timeframe], live.lastTick?.time, timeframe) : [];
+      return map;
+    },
+    {} as Record<Timeframe, Candle[]>,
+  );
+}
+
+function getClosedOfficialCandles(candles: Candle[], tickTime: number | undefined, timeframe: Timeframe) {
+  const last = candles.at(-1);
+
+  if (!last || !tickTime) {
+    return candles;
+  }
+
+  const candleCloseTime = last.time + timeframeSeconds[timeframe];
+  return tickTime < candleCloseTime ? candles.slice(0, -1) : candles;
+}
+
+function buildDataCheck({
+  activeTimeframe,
+  analysisCandleMap,
+  candleMap,
+  live,
+  symbolProfile,
+}: {
+  activeTimeframe: Timeframe;
+  analysisCandleMap: Record<Timeframe, Candle[]>;
+  candleMap: Record<Timeframe, Candle[]>;
+  live: LiveMarketState;
+  symbolProfile: SymbolProfile;
+}): DataCheckSummary {
+  const activeSync = live.candleSync[activeTimeframe];
+  const activeAnalysisCandles = analysisCandleMap[activeTimeframe];
+  const activeDisplayCandles = candleMap[activeTimeframe];
+  const lastDisplayCandle = activeDisplayCandles.at(-1) ?? null;
+  const isForming = Boolean(lastDisplayCandle && live.lastTick && live.lastTick.time < lastDisplayCandle.time + timeframeSeconds[activeTimeframe]);
+  const closedCandle = isForming ? activeDisplayCandles.at(-2) ?? null : lastDisplayCandle;
+  const lastSync = getLatestSyncTime(live);
+  const staleMs = lastSync ? Date.now() - Date.parse(lastSync) : Number.POSITIVE_INFINITY;
+  const counts = timeframes.reduce(
+    (accumulator, timeframe) => ({
+      ...accumulator,
+      [timeframe]: analysisCandleMap[timeframe].length,
+    }),
+    {} as Record<Timeframe, number>,
+  );
+  const enoughCoreHistory = counts.M1 >= 50 && counts.M5 >= 50 && counts.M15 >= 50;
+  const sourceLabel = activeSync?.source ?? live.source ?? "unavailable";
+  const brokerSymbol = activeSync?.brokerSymbol ?? live.brokerSymbol ?? live.lastTick?.symbol ?? symbolProfile.symbol;
+  const status: DataCheckSummary["status"] = !enoughCoreHistory ? "Historique insuffisant" : staleMs > 20_000 ? "Sync retardee" : "Sync OK";
+  const statusMessage =
+    status === "Sync OK"
+      ? "Les signaux utilisent les bougies OHLC MT5/Exness disponibles. Les bougies en formation restent non confirmees."
+      : status === "Sync retardee"
+        ? "La derniere synchronisation MT5 est en retard. Evite les signaux scalping tant que le flux n'est pas frais."
+        : "Historique insuffisant pour analyse fiable. Les signaux sont bloques/limites tant que les OHLC MT5 officiels ne sont pas charges.";
+
+  return {
+    activeTimeframe,
+    brokerSymbol,
+    candleCounts: counts,
+    closedCandleLabel: closedCandle ? formatCandleLabel(closedCandle) : "--",
+    exactSymbol: symbolProfile.symbol,
+    formingCandleLabel: isForming && lastDisplayCandle ? formatCandleLabel(lastDisplayCandle) : "Aucune bougie en formation detectee",
+    lastSyncLabel: lastSync ? new Date(lastSync).toLocaleString("fr-FR", { hour12: false }) : "--",
+    serverTimeLabel: live.lastTick ? formatTickDateTime(live.lastTick.time) : "--",
+    sourceLabel,
+    status,
+    statusMessage,
+    tradingViewWarning: "TradingView peut differer de MT5 si le broker/source n'est pas identique. Les signaux de trading sont bases sur les bougies OHLC MT5/Exness officielles quand elles sont disponibles.",
+  };
+}
+
+function getLatestSyncTime(live: LiveMarketState) {
+  const candidates = Object.values(live.candleSync)
+    .map((sync) => sync.updatedAt)
+    .filter((value): value is string => Boolean(value));
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return candidates.sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+}
+
+function formatCandleLabel(candle: Candle) {
+  return `${formatTickDateTime(candle.time)} O ${formatPrice(candle.open)} H ${formatPrice(candle.high)} L ${formatPrice(candle.low)} C ${formatPrice(candle.close)}`;
+}
+
+function formatTickDateTime(value?: number) {
+  if (!value) {
+    return "--";
+  }
+
+  return new Date(value * 1000).toLocaleString("fr-FR", { hour12: false });
 }
 
 function formatPrice(value?: number) {

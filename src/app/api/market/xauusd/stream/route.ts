@@ -28,6 +28,7 @@ export async function GET(request: Request) {
           send("tick", {
             source: result.provider,
             symbol: result.symbol,
+            brokerSymbol: result.brokerSymbol ?? result.data.symbol ?? result.symbol,
             warning: result.warning,
             updatedAt: new Date().toISOString(),
             tick: result.data,
@@ -36,6 +37,7 @@ export async function GET(request: Request) {
           send("market-error", {
             source: "unavailable",
             symbol,
+            brokerSymbol: symbol,
             message: error instanceof Error ? error.message : `Tick ${symbol} indisponible.`,
             updatedAt: new Date().toISOString(),
           });

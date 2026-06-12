@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Candle, LiveMarketState, MarketTick, SymbolCode, Timeframe } from "@/types";
+import type { Candle, CandleSyncState, LiveMarketState, MarketTick, SymbolCode, Timeframe } from "@/types";
 import { applyTickToCandles, normalizeHistoryCandles, normalizeProviderTick } from "@/lib/market/candle-engine";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -12,6 +12,22 @@ function createEmptyCandleMap(): Record<Timeframe, Candle[]> {
       [timeframe]: [],
     }),
     {} as Record<Timeframe, Candle[]>,
+  );
+}
+
+function createEmptyCandleSyncMap(): Record<Timeframe, CandleSyncState> {
+  return timeframes.reduce(
+    (accumulator, timeframe) => ({
+      ...accumulator,
+      [timeframe]: {
+        brokerSymbol: null,
+        official: false,
+        reconstructed: false,
+        source: null,
+        updatedAt: null,
+      },
+    }),
+    {} as Record<Timeframe, CandleSyncState>,
   );
 }
 
@@ -27,10 +43,12 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
     status: "connecting",
     message: `Connexion au flux ${normalizedSymbol} live.`,
     source: null,
+    brokerSymbol: null,
     lastTick: null,
     serverOffsetMinutes: Number.isFinite(serverOffsetMinutes) ? serverOffsetMinutes : 0,
     latencyMs: null,
     candleMap: createEmptyCandleMap(),
+    candleSync: createEmptyCandleSyncMap(),
   });
   const retryRef = useRef(0);
   const endpoints = useMemo(
@@ -49,26 +67,40 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
 
     const latencyMs = Math.max(0, Date.now() - tick.time * 1000);
     const appTick = { ...tick, symbol: normalizedSymbol };
+    const sourceLabel = source ?? tick.symbol ?? "MT5 tick";
+    const tickOfficial = isMt5Source(sourceLabel);
 
     setState((current) => {
       const candleMap = { ...current.candleMap };
+      const candleSync = { ...current.candleSync };
       for (const timeframe of timeframes) {
+        const previousSync = current.candleSync[timeframe];
         candleMap[timeframe] = applyTickToCandles({
           candles: current.candleMap[timeframe],
           tick: appTick,
           timeframe,
           serverOffsetMinutes: current.serverOffsetMinutes,
         });
+        candleSync[timeframe] = {
+          ...previousSync,
+          brokerSymbol: previousSync.brokerSymbol ?? tick.symbol ?? normalizedSymbol,
+          official: Boolean(previousSync.official && tickOfficial),
+          reconstructed: true,
+          source: previousSync.official ? `${previousSync.source ?? "MT5 Bridge"} + forming tick` : `${sourceLabel} reconstructed from ticks`,
+          updatedAt: new Date().toISOString(),
+        };
       }
 
       return {
         ...current,
         status: "live",
         message,
-        source,
+        source: sourceLabel,
+        brokerSymbol: tick.symbol ?? current.brokerSymbol ?? normalizedSymbol,
         lastTick: appTick,
         latencyMs,
         candleMap,
+        candleSync,
       };
     });
   }
@@ -100,19 +132,36 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
       status: "connecting",
       message: `Connexion au flux ${normalizedSymbol} live.`,
       source: null,
+      brokerSymbol: null,
       lastTick: null,
       serverOffsetMinutes: Number.isFinite(serverOffsetMinutes) ? serverOffsetMinutes : 0,
       latencyMs: null,
       candleMap: createEmptyCandleMap(),
+      candleSync: createEmptyCandleSyncMap(),
     });
 
     async function loadHistory() {
-      const results: Array<readonly [Timeframe, Candle[]]> = [];
+      const results: Array<{
+        brokerSymbol: string;
+        candles: Candle[];
+        source: string | null;
+        timeframe: Timeframe;
+        updatedAt: string | null;
+      }> = [];
 
       for (const timeframe of timeframes) {
         try {
           const payload = await fetchFirstHistoryJson(endpoints.history, timeframe, normalizedSymbol);
-          results.push([timeframe, normalizeHistoryCandles(payload)] as const);
+          const source = getMarketSource(payload);
+          const brokerSymbol = getMarketSymbol(payload) ?? normalizedSymbol;
+          const updatedAt = getMarketUpdatedAt(payload);
+          results.push({
+            brokerSymbol,
+            candles: normalizeHistoryCandles(payload),
+            source,
+            timeframe,
+            updatedAt,
+          });
           await wait(120);
         } catch {
           await wait(350);
@@ -125,15 +174,29 @@ export function useLiveXauusd(symbol: SymbolCode = "XAUUSD"): LiveMarketState {
 
       setState((current) => {
         const candleMap = { ...current.candleMap };
+        const candleSync = { ...current.candleSync };
         for (const result of results) {
-          candleMap[result[0]] = result[1];
+          candleMap[result.timeframe] = result.candles;
+
+          if (result.candles.length) {
+            candleSync[result.timeframe] = {
+              brokerSymbol: result.brokerSymbol,
+              official: isMt5Source(result.source),
+              reconstructed: false,
+              source: result.source,
+              updatedAt: result.updatedAt,
+            };
+          }
         }
 
         const loadedCount = Object.values(candleMap).reduce((total, candles) => total + candles.length, 0);
+        const brokerSymbol = results.find((result) => result.brokerSymbol)?.brokerSymbol ?? current.brokerSymbol;
 
         return {
           ...current,
+          brokerSymbol,
           candleMap,
+          candleSync,
           message: loadedCount ? `Historique ${normalizedSymbol} charge, connexion au live en cours.` : current.message,
         };
       });
@@ -411,4 +474,37 @@ function getMarketSource(data: unknown) {
   }
 
   return null;
+}
+
+function getMarketSymbol(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  if ("brokerSymbol" in data && data.brokerSymbol) {
+    return String(data.brokerSymbol).toUpperCase();
+  }
+
+  if ("symbol" in data && data.symbol) {
+    return String(data.symbol).toUpperCase();
+  }
+
+  return null;
+}
+
+function getMarketUpdatedAt(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+
+  if ("updatedAt" in data && data.updatedAt) {
+    return String(data.updatedAt);
+  }
+
+  return null;
+}
+
+function isMt5Source(source: string | null | undefined) {
+  const normalized = String(source ?? "").toUpperCase();
+  return normalized.includes("MT5") || normalized.includes("EXNESS") || normalized.includes("BRIDGE");
 }

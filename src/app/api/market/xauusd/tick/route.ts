@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       {
         source: result.provider,
         symbol: result.symbol,
+        brokerSymbol: result.brokerSymbol ?? result.data.symbol ?? result.symbol,
         updatedAt: new Date().toISOString(),
         warning: result.warning,
         tick: result.data,
@@ -31,6 +32,7 @@ export async function GET(request: Request) {
         error: error instanceof Error ? error.message : `Tick ${symbol} indisponible.`,
         source: "unavailable",
         symbol,
+        brokerSymbol: symbol,
         updatedAt: new Date().toISOString(),
         tick: null,
       },

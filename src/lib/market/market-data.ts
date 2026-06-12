@@ -6,6 +6,7 @@ import { fetchYahooGoldHistory, fetchYahooGoldTick, getYahooGoldSymbol, getYahoo
 import { normalizeSymbol } from "@/lib/symbols/profiles";
 
 export interface MarketDataResult<T> {
+  brokerSymbol?: string;
   data: T;
   provider: string;
   symbol: string;
@@ -18,6 +19,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number, sy
 
   if (mt5) {
     return {
+      brokerSymbol: mt5.brokerSymbol,
       data: mt5.data,
       provider: mt5.provider,
       symbol: mt5.symbol,
@@ -33,6 +35,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number, sy
 
       if (data.length) {
         return {
+          brokerSymbol: cryptoFeedSymbol,
           data,
           provider: getCryptoOhlcSourceLabel(),
           symbol: cryptoFeedSymbol,
@@ -59,6 +62,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number, sy
 
     if (data.length) {
       return {
+        brokerSymbol: getEodhdRestSymbol(),
         data,
         provider: `Fallback, not live MT5 - ${getEodhdSourceLabel()}`,
         symbol: getEodhdRestSymbol(),
@@ -71,6 +75,7 @@ export async function fetchMarketHistory(timeframe: Timeframe, limit: number, sy
     const data = await fetchYahooGoldHistory(timeframe, limit);
 
     return {
+      brokerSymbol: getYahooGoldSymbol(),
       data,
       provider: `Fallback, not live MT5 - ${getYahooSourceLabel()}`,
       symbol: getYahooGoldSymbol(),
@@ -85,6 +90,7 @@ export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResu
 
   if (mt5) {
     return {
+      brokerSymbol: mt5.brokerSymbol,
       data: mt5.data,
       provider: mt5.provider,
       symbol: mt5.symbol,
@@ -104,6 +110,7 @@ export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResu
     }
 
     return {
+      brokerSymbol: cryptoFeedSymbol,
       data: { ...data, symbol: normalizedSymbol },
       provider: getCryptoOhlcSourceLabel(),
       symbol: cryptoFeedSymbol,
@@ -123,6 +130,7 @@ export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResu
     const data = await fetchEodhdTick();
 
     return {
+      brokerSymbol: getEodhdRestSymbol(),
       data,
       provider: `Fallback, not live MT5 - ${getEodhdSourceLabel()}`,
       symbol: getEodhdRestSymbol(),
@@ -132,6 +140,7 @@ export async function fetchMarketTick(symbol = "XAUUSD"): Promise<MarketDataResu
     const data = await fetchYahooGoldTick();
 
     return {
+      brokerSymbol: getYahooGoldSymbol(),
       data,
       provider: `Fallback, not live MT5 - ${getYahooSourceLabel()}`,
       symbol: getYahooGoldSymbol(),

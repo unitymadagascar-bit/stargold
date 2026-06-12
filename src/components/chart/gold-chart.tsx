@@ -15,7 +15,7 @@ import {
   type LogicalRange,
   type UTCTimestamp,
 } from "lightweight-charts";
-import type { Candle, FvgAnalysis, LiveConnectionStatus, MarketScenarioLevel, MarketTick, OrbAnalysis, OrderBlockZone, SymbolProfile, Timeframe, TradePlan } from "@/types";
+import type { Candle, CandleSyncState, FvgAnalysis, LiveConnectionStatus, MarketScenarioLevel, MarketTick, OrbAnalysis, OrderBlockZone, SymbolProfile, Timeframe, TradePlan } from "@/types";
 import { calculateRSI } from "@/lib/indicators";
 import { timeframes } from "@/lib/market/timeframes";
 
@@ -67,6 +67,7 @@ const CHART_HEIGHTS = {
 
 export function GoldChart({
   candleMap,
+  candleSync,
   connectionMessage,
   connectionSource,
   connectionStatus,
@@ -82,6 +83,7 @@ export function GoldChart({
   timeframe,
 }: {
   candleMap: Record<Timeframe, Candle[]>;
+  candleSync: Record<Timeframe, CandleSyncState>;
   connectionMessage: string;
   connectionSource: string | null;
   connectionStatus: LiveConnectionStatus;
@@ -101,6 +103,7 @@ export function GoldChart({
   timeframe: Timeframe;
 }) {
   const candles = candleMap[timeframe];
+  const sync = candleSync[timeframe];
   const [ohlc, setOhlc] = useState<Candle | null>(candles.at(-1) ?? null);
   const [orderBlockOverlay, setOrderBlockOverlay] = useState<OrderBlockOverlay | null>(null);
   const [fvgOverlay, setFvgOverlay] = useState<ZoneOverlay | null>(null);
@@ -175,6 +178,8 @@ export function GoldChart({
           ? "TradingView visual mode"
           : "MT5 Bridge OHLC";
   const lastAnalysisCandleLabel = candles.at(-1) ? formatUtcTime(candles.at(-1)?.time) : "--";
+  const candleCountLabel = `M1 ${candleMap.M1.length} / M5 ${candleMap.M5.length} / M15 ${candleMap.M15.length} / H1 ${candleMap.H1.length}`;
+  const sourceTruthLabel = sync?.official ? "OHLC MT5 officiel" : sync?.reconstructed ? "Reconstruit/fallback, non officiel" : "OHLC MT5 absent";
   const fallbackHint =
     showTradingViewFallback && connectionSource
       ? `MT5 indisponible pour ${symbolProfile.symbol}. Derniere source app: ${connectionSource}.`
@@ -843,6 +848,15 @@ export function GoldChart({
           <span className="rounded border border-violet-300/25 bg-violet-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-violet-100">
             Source analyse : {analysisSourceLabel}
           </span>
+          <span className={`rounded border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] ${sync?.official ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-100" : "border-amber-300/25 bg-amber-300/10 text-amber-100"}`}>
+            Source bougies : {sourceTruthLabel}
+          </span>
+          <span className="rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-200">
+            Symbole broker : {sync?.brokerSymbol ?? lastTick?.symbol ?? symbolProfile.symbol}
+          </span>
+          <span className="rounded border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-200">
+            Bougies chargees : {candleCountLabel}
+          </span>
           <span className="rounded border border-amber-300/25 bg-amber-300/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-100">
             Source execution : {executionSourceLabel}
           </span>
@@ -877,6 +891,11 @@ export function GoldChart({
       </div>
 
       {showTradingViewFallback ? <TradingViewFallbackNotice analysisSourceLabel={analysisSourceLabel} fallbackHint={fallbackHint} symbolProfile={symbolProfile} /> : null}
+      {showTradingViewFallback || !sync?.official ? (
+        <div className="mt-2 rounded-md border border-amber-300/20 bg-amber-300/10 px-3 py-2 text-xs leading-5 text-amber-100">
+          TradingView peut differer de MT5 si le broker/source n'est pas identique. Les signaux de trading sont bases sur MT5/Exness; une bougie reconstruite ou externe reste indicative.
+        </div>
+      ) : null}
 
       <div
         ref={chartAreaRef}
@@ -1300,7 +1319,7 @@ function TradingViewFallbackNotice({
     <div className="mt-3 rounded-md border border-sky-300/20 bg-[#07111f] px-3 py-2 shadow-[0_10px_35px_rgba(0,0,0,0.22)]">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-sky-200">Source graphique : TradingView Crypto</p>
       <p className="mt-1 text-xs leading-5 text-slate-200">
-        {symbolProfile.symbol} affiche TradingView Crypto. Les signaux sont bases sur Crypto OHLC Feed quand les bougies internes sont disponibles et restent educatifs/probabilistes.
+        {symbolProfile.symbol} affiche TradingView Crypto. TradingView peut venir d'un autre broker; les signaux de trading Exness restent bases sur MT5/Exness quand les OHLC officiels sont disponibles.
       </p>
       <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-[0.12em]">
         <span className="rounded border border-violet-300/20 bg-violet-300/10 px-2 py-0.5 text-violet-100">Source analyse : {analysisSourceLabel}</span>
